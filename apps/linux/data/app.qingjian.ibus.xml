@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ibus 组件描述。`<name>` 必须与引擎进程内 request 的 D-Bus 名一致（app.qingjian.ibus），
+     ibus-daemon 靠 NameOwnerChanged 把拉起的进程绑到这个组件上。
+     安装：复制到 /usr/share/ibus/component/（或用 IBUS_COMPONENT_PATH 指到本文件），
+     exec 换成实际路径。scripts/install-dev.sh 会做替换。 -->
+<component>
+	<name>app.qingjian.ibus</name>
+	<description>Qingjian input method</description>
+	<exec>@BIN_DIR@/ibus-engine-qingjian --ibus</exec>
+	<version>@VERSION@</version>
+	<author>Qingjian contributors</author>
+	<license>GPL-3.0-or-later</license>
+	<homepage>https://github.com/qingjian-team/qingjian</homepage>
+
+	<observed-paths>
+		<path>@BIN_DIR@/ibus-engine-qingjian</path>
+	</observed-paths>
+
+	<engines>
+		<engine>
+			<name>qingjian</name>
+			<language>zh_CN</language>
+			<license>GPL-3.0-or-later</license>
+			<author>Qingjian contributors</author>
+			<icon></icon>
+			<layout>default</layout>
+			<longname>青简</longname>
+			<description>青简拼音（全拼 / 双拼）</description>
+			<symbol>简</symbol>
+			<rank>1</rank>
+		</engine>
+	</engines>
+</component>

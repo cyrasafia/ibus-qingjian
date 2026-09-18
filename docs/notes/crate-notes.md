@@ -197,6 +197,40 @@ IMK 输入法，源码按 `app / host / imk / candidates / menubar / preferences
   结果到了重查一次只重画当前页（翻过页 / 动过高亮不动）；「云服务」页有开关（`[model] enabled`）。
 - 端到端验证可用 `osascript` 的 System Events 往 TextEdit 发按键再读回文本（终端需要辅助功能权限；输入法得在中文模式）。
 
+## apps/linux
+
+ibus 引擎（本 fork 新增，GNOME+Wayland+ibus 的 MVP，设计见 `docs/design/ibus-qingjian.md`）。
+`cargo build -p qingjian-linux` 出 `ibus-engine-qingjian`，被 ibus-daemon 按组件 XML 拉起。
+
+- **协议层用 librush**（crates.io `librush` 0.2，纯 Rust zbus 直连 ibus D-Bus，无 GObject）：`IBusEngine` trait 的方法回调
+  进 `ibus/engine.rs` 的 `QingjianEngine`；它给所有引擎对象用同一个 D-Bus 对象路径（`/org/freedesktop/IBus/Engine/1`），
+  多个 input context 共享一个实现——正好匹配进程单例 `Host`（`Arc<Mutex<Host>>`，同 mac 壳思路）。
+- **进程内 request 的 D-Bus 名必须等于组件 XML 的 `<name>`**（`app.qingjian.ibus`），ibus-daemon 按 NameOwnerChanged 绑进程。
+- 按键分流在 `host/keys.rs`（照 mac 壳 `imk/controller` 的语义移植，`Outcome { handled, commits, refresh }`），
+  纯函数不碰平台 API，测试直接拿样例词库建 Engine 跑按键流。keyval 翻译在 `ibus/keymap.rs`（X keysym，小键盘数字归一）。
+- 呈现在 `ibus/present.rs`：锁内构 `Frame`（preedit 文本 + LookupTable），锁外发 D-Bus 信号。preedit 内联显示拼音
+  （`Query::marked_text` + 字符光标，同 mac 的 marked text）；候选表全量候选 + `page_size` + 高亮光标，
+  分页渲染交给 ibus 原生候选窗；辅助行没用。
+- 中英切换：Shift 单击（press 到 release 之间无其他键），切模式时组句原样上屏；Caps Lock 亮 = 纯直通。
+  Ctrl/Alt/Super 组合是应用快捷键：组句中先原样上屏再放行。
+- 失焦 / 停用：拼音原样上屏（对齐 Windows 的失焦上屏）+ `break_chain`；停用（被切走，对齐 mac 的 deactivate）时顺带
+  `flush_learning`；`Reset` = 清空。
+- 修饰键组合：Ctrl / Alt / Super 组合是应用快捷键——组句中先原样上屏再放行（`handled = false`），缓冲不丢；
+  两修饰键和弦（Shift+Ctrl 之类）不算切换键单击（press / release 都看其他显著修饰键是否按着）。
+- 依赖树只有 core / dictionary / learning / lm / platform（zbus/librush/xkeysym/tokio），translate / predict / neural / render 不进。
+- 数据路径（`host/paths.rs`）：配置 `~/.config/qingjian/config.toml`（60 秒 mtime 热加载，随落盘任务一起）、
+  学习数据 `~/.local/share/qingjian/`、随包数据 `$QINGJIAN_DATA_DIR` → `/usr/share/qingjian`（开发时指到
+  `assets/lexicon` 可用仓库数据）。日志 stderr 进 journal。
+- panic 边界：分流包 `catch_unwind`，锁毒化用 `into_inner` 恢复、清空组句放行当键。
+- 组件 XML 在 `apps/linux/data/app.qingjian.ibus.xml`（`@BIN_DIR@` 占位）；开发安装 `apps/linux/scripts/install-dev.sh`
+  （替换路径、装进 `/usr/share/ibus/component/`、`ibus write-cache && ibus restart`）。
+- 没做：SetSurroundingText（前文）、SetCapabilities（客户端能力探测）、Property 菜单、按应用配置（ibus 不给应用身份）、
+  Shift+数字删候选（mac 壳有 `[shortcut] delete_candidate`，Linux 壳组句中的 Shift+数字仍按直输段处理）、
+  个人词库导入导出（学习数据本身是 TSV，API 化待做）。
+- 配置覆盖面：`traditional` / `english_candidates` / `log_level`（启动时读）都已接；共享模板里还有
+  `[dictionaries]`（附加词库 / 领域词库开关）与 `[general] input_log`（输入日志）两项**未接**——配置文件里写了不生效；
+  主题 / 外观 / preedit 模式各项对 ibus 原生候选窗无意义（观感随系统）。
+
 ## apps/windows
 
 一个产品两个 package：`server`（Server 进程：IPC 分派 + Engine + 命名管道 + 自绘候选窗与悬浮状态条）与 `tsf`（TSF 文本服务 DLL，lib 名固定 `qingjian_tsf`），

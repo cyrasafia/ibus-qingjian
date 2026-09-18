@@ -11,7 +11,7 @@ members = [
     "crates/qingjian-format",
     "crates/qingjian-neural",
     "crates/qingjian-render",
-    "apps/linux/server", "apps/cli", "apps/macos", "apps/windows/server", "apps/windows/tsf", "apps/windows/settings", "tools/dict-convert", "tools/gloss-gen",
+    "apps/linux/server", "apps/linux", "apps/cli", "apps/macos", "apps/windows/server", "apps/windows/tsf", "apps/windows/settings", "tools/dict-convert", "tools/gloss-gen",
 ]
 
 [workspace.package]
@@ -73,6 +73,13 @@ tiny-skia = "0.12.0"
 # 不开 fontconfig：不扫系统字体库，字体文件由渲染器按平台清单自己加载
 cosmic-text = { version = "0.19.0", default-features = false, features = ["std", "swash"] }
 png = "0.18.1"
+
+# Linux 壳：ibus 引擎的 D-Bus 协议（纯 Rust、不绑 GObject），tokio 走 zbus 的 tokio 执行器
+librush = { version = "0.2.3", default-features = false, features = ["pmim"] }
+# X keysym 常量与名字（ibus 按键的 keyval 就是 keysym）
+xkeysym = "0.2.1"
+# 壳的引擎签名要直接用到 zbus 的 SignalEmitter / fdo 类型；与 librush 同一版本实例
+zbus = { version = "5.18.0", default-features = false, features = ["tokio"] }
 
 # macOS 平台层
 objc2 = "0.6.4"

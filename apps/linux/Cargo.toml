@@ -1,0 +1,28 @@
+[package]
+name = "qingjian-linux"
+description = "Linux 输入法的 ibus 引擎：持有 Core Engine，被 ibus-daemon 按需拉起，候选窗走 ibus 原生 LookupTable"
+version = "0.1.4-dev"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "ibus-engine-qingjian"
+path = "src/main.rs"
+
+[dependencies]
+qingjian-core.workspace = true
+qingjian-dictionary.workspace = true
+qingjian-learning.workspace = true
+qingjian-lm.workspace = true
+qingjian-platform.workspace = true
+librush.workspace = true
+xkeysym.workspace = true
+zbus.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

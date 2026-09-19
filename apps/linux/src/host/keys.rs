@@ -288,7 +288,9 @@ pub fn handle_command(
         }
         return Outcome::passed();
     }
+    // 退格 / Esc 照常删掉它，不走「还原成问号上屏」（对齐 Windows 壳；先上屏再放行退格会让应用删错字符）
     if key != CommandKey::Escape
+        && key != CommandKey::Backspace
         && let Some(mark) = engine.restore_bare_question(engine.english_mode())
     {
         // 缓冲区里只有一个 `?` 而用户按了命令键：把它还原成问号上屏（中文遵循标点设置、英文半角）、清空缓冲区。
@@ -592,6 +594,40 @@ mod tests {
         );
         assert!(outcome.handled);
         assert_eq!(outcome.commits, vec!["？".to_owned()]);
+    }
+
+    #[test]
+    fn backspace_on_bare_question_deletes_it_instead_of_committing() {
+        // 裸 ? 下的退格是「删掉它」，不是「还原成 ？ 上屏再放行退格」——
+        // 先上屏再放行会让应用删错字符（match 重构时弄反过一次，评审抓回）
+        let dict = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/sample/dict.tsv");
+        let mut host = Host::with_engine(Engine::new(
+            Dictionary::from_path(dict).expect("样例词库读不了"),
+        ));
+        host.engine.set_mode_keys(qingjian_core::ModeKeys {
+            question_mark: true,
+            ..qingjian_core::ModeKeys::default()
+        });
+        assert!(
+            handle_char(
+                &mut host.engine,
+                &mut host.session,
+                host.page_size,
+                host.page_keys,
+                host.english_candidates,
+                '?'
+            )
+            .handled
+        );
+        let outcome = handle_command(
+            &mut host.engine,
+            &mut host.session,
+            host.page_size,
+            CommandKey::Backspace,
+        );
+        assert!(outcome.handled, "退格要吃掉");
+        assert!(outcome.commits.is_empty(), "退格不上屏任何东西");
+        assert!(host.engine.composition().is_empty(), "缓冲清空");
     }
 
     #[test]

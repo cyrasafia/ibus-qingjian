@@ -19,21 +19,34 @@ pub struct Outcome {
 
     /// 处理完是否要重查候选并刷新 preedit 与候选表。
     pub refresh: bool,
+
+    /// 只动了高亮 / 页位：不重查（重查会把高亮与页位归零，翻页等于白翻），
+    /// 按当前会话状态重画一帧。
+    pub redraw: bool,
 }
 
 impl Outcome {
-    /// 吃掉并刷新（最常见的结果）。
+    /// 吃掉并刷新（改了缓冲区的键用这个）。
     pub(crate) fn consumed() -> Self {
         Self {
             handled: true,
-            commits: Vec::new(),
             refresh: true,
+            ..Self::default()
         }
     }
 
     /// 不吃、不刷新（普通放行）。
     pub(crate) fn passed() -> Self {
         Self::default()
+    }
+
+    /// 吃掉、只重画（动高亮 / 翻页的键用这个，对齐 mac 壳 turn_page 只 render 不 refresh）。
+    pub(crate) fn redrawn() -> Self {
+        Self {
+            handled: true,
+            redraw: true,
+            ..Self::default()
+        }
     }
 
     /// 上屏一段文本并继续刷新（上屏后剩余拼音继续组句）。
@@ -60,9 +73,6 @@ pub enum CommandKey {
     End,
     PageUp,
     PageDown,
-
-    /// 组句中不认识的其他键。
-    Unknown,
 }
 
 /// 字符键（可打印）的处理，对应 mac 壳 `handle_text`。
@@ -177,12 +187,12 @@ pub fn handle_char(
             c if c == page_previous => {
                 session.turn_page(-1, page_size);
                 engine.note_page_turn();
-                return Outcome::consumed();
+                return Outcome::redrawn();
             }
             c if c == page_next => {
                 session.turn_page(1, page_size);
                 engine.note_page_turn();
-                return Outcome::consumed();
+                return Outcome::redrawn();
             }
             // 其他字符：把当前高亮候选上屏，再按非组句状态处理这个字符（通常是标点）
             _ => {
@@ -301,14 +311,14 @@ pub fn handle_command(
         } else {
             session.turn_page(1, page_size);
             engine.note_page_turn();
-            Outcome::consumed()
+            Outcome::redrawn()
         }
     } else if key == CommandKey::Up {
         session.move_highlight(-1);
-        Outcome::consumed()
+        Outcome::redrawn()
     } else if key == CommandKey::Down {
         session.move_highlight(1);
-        Outcome::consumed()
+        Outcome::redrawn()
     } else if key == CommandKey::Left {
         engine.move_cursor_left();
         Outcome::consumed()
@@ -324,11 +334,11 @@ pub fn handle_command(
     } else if key == CommandKey::PageUp {
         session.turn_page(-1, page_size);
         engine.note_page_turn();
-        Outcome::consumed()
+        Outcome::redrawn()
     } else if key == CommandKey::PageDown {
         session.turn_page(1, page_size);
         engine.note_page_turn();
-        Outcome::consumed()
+        Outcome::redrawn()
     } else {
         Outcome::consumed()
     }

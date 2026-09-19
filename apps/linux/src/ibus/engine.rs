@@ -41,7 +41,14 @@ fn lock(host: &Arc<Mutex<Host>>) -> MutexGuard<'_, Host> {
 fn dispatch(host: &mut Host, key: PressedKey) -> (Outcome, Option<present::Frame>) {
     let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
         let outcome = dispatch_inner(host, key);
-        let frame = outcome.refresh.then(|| present::frame_after_change(host));
+        // 改了缓冲区才重查；只动高亮 / 页位的键按当前会话重画（重查会把它们归零）
+        let frame = if outcome.refresh {
+            Some(present::frame_after_change(host))
+        } else if outcome.redraw {
+            Some(present::frame_of(host))
+        } else {
+            None
+        };
         (outcome, frame)
     }));
     match result {
@@ -148,17 +155,14 @@ fn dispatch_inner(host: &mut Host, pressed: PressedKey) -> Outcome {
         }
         Some(Key::Command(command)) => {
             host.break_switch_tap();
-            // 组句中的 Shift+Tab 是上一页（对齐 mac 的 Backtab）；组句外是应用的反向 Tab，照常放行
-            let command = if command == CommandKey::Tab
-                && state.shift()
-                && !host.engine.composition().is_empty()
+            // 组句中的 Shift+Tab 是上一页（对齐 mac 的 Backtab）；组句外是应用的反向 Tab，照常放行。
+            // 翻完直接出「只重画」的结果，不再进 handle_command（那边按 Unknown 处理会触发重查、白翻）
+            if command == CommandKey::Tab && state.shift() && !host.engine.composition().is_empty()
             {
                 host.session.turn_page(-1, host.page_size);
                 host.engine.note_page_turn();
-                CommandKey::Unknown
-            } else {
-                command
-            };
+                return Outcome::redrawn();
+            }
             keys::handle_command(&mut host.engine, &mut host.session, host.page_size, command)
         }
         None => {
@@ -482,6 +486,52 @@ mod tests {
             },
         );
         assert!(!outcome.handled, "组句外的 Shift+Tab 是应用的反向 Tab");
+    }
+
+    #[test]
+    fn page_keys_redraw_without_requerying_so_the_page_survives() {
+        // 真词库下 nihao 的候选远超一页；翻页后高亮必须落到新页第一格，
+        // 而不是被「重查 + session 归零」打回第一页（2026-09-19 真机翻页失效的根因）
+        let dict = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/lexicon/dict.tsv");
+        let mut host = Host::with_engine(Engine::new(
+            Dictionary::from_path(dict).expect("词库读不了"),
+        ));
+        let press = |key| PressedKey {
+            key: Some(key),
+            state: IBusModifierState::new_with_raw_value(0),
+        };
+        for c in "nihao".chars() {
+            let (outcome, _) = dispatch(&mut host, press(Key::Char(c)));
+            assert!(outcome.handled);
+        }
+        assert!(
+            host.session.candidates().len() > host.page_size,
+            "样例要能翻页：候选得多于一页"
+        );
+
+        let (outcome, frame) = dispatch(&mut host, press(Key::Char(']')));
+        assert!(
+            outcome.handled && !outcome.refresh && outcome.redraw,
+            "翻页只重画不重查"
+        );
+        let frame = frame.expect("翻页要重画一帧");
+        assert!(frame.table_visible);
+        assert_eq!(
+            frame.table.cursor_pos(),
+            host.page_size as u32,
+            "翻页后高亮落到第二页第一格"
+        );
+
+        // 组句中的 Shift+Tab 是上一页：应回到第一页第一格
+        let (outcome, frame) = dispatch(
+            &mut host,
+            PressedKey {
+                key: Some(Key::Command(CommandKey::Tab)),
+                state: IBusModifierState::new_with_raw_value(1),
+            },
+        );
+        assert!(outcome.handled && outcome.redraw && !outcome.refresh);
+        assert_eq!(frame.expect("上一页也要重画").table.cursor_pos(), 0);
     }
 
     #[test]

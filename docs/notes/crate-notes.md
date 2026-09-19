@@ -206,7 +206,9 @@ ibus 引擎（本 fork 新增，GNOME+Wayland+ibus 的 MVP，设计见 `docs/des
   进 `ibus/engine.rs` 的 `QingjianEngine`；它给所有引擎对象用同一个 D-Bus 对象路径（`/org/freedesktop/IBus/Engine/1`），
   多个 input context 共享一个实现——正好匹配进程单例 `Host`（`Arc<Mutex<Host>>`，同 mac 壳思路）。
 - **进程内 request 的 D-Bus 名必须等于组件 XML 的 `<name>`**（`app.qingjian.ibus`），ibus-daemon 按 NameOwnerChanged 绑进程。
-- 按键分流在 `host/keys.rs`（照 mac 壳 `imk/controller` 的语义移植，`Outcome { handled, commits, refresh }`），
+- 按键分流在 `host/keys.rs`（照 mac 壳 `imk/controller` 的语义移植，`Outcome { handled, commits, refresh, redraw }`：
+  改缓冲的键 `refresh`（重查构帧），只动高亮 / 翻页的键 `redraw`（按当前会话重画——重查会把高亮与页位归零，翻页等于白翻，
+  对齐 mac 壳 turn_page 只 render 不 refresh）），
   纯函数不碰平台 API，测试直接拿样例词库建 Engine 跑按键流。keyval 翻译在 `ibus/keymap.rs`（X keysym，小键盘数字归一）。
 - 呈现在 `ibus/present.rs`：锁内构 `Frame`（preedit 文本 + LookupTable），锁外发 D-Bus 信号。preedit 内联显示拼音
   （`Query::marked_text` + 字符光标，同 mac 的 marked text），**同帧把拼音再发一遍辅助行**（`UpdateAuxiliaryText`，

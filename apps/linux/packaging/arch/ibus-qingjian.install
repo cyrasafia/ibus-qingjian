@@ -1,0 +1,16 @@
+# makepkg 的安装钩子（PKGBUILD 的 install= 指到这里）。pacman 7 起不再从 PKGBUILD 里提取 post_* 函数。
+
+post_install() {
+    # 刷新 ibus 组件缓存；ibus 没在跑时失败也无妨（下次 ibus restart 会再刷）
+    ibus write-cache >/dev/null 2>&1 || true
+    echo '安装完成：注销重登后在输入源里添加「青简」，或运行 ibus engine qingjian'
+}
+
+post_upgrade() {
+    ibus write-cache >/dev/null 2>&1 || true
+    echo '升级完成：ibus restart 后生效'
+}
+
+post_remove() {
+    ibus write-cache >/dev/null 2>&1 || true
+}

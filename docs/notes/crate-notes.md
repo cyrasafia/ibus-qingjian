@@ -224,6 +224,10 @@ ibus 引擎（本 fork 新增，GNOME+Wayland+ibus 的 MVP，设计见 `docs/des
 - panic 边界：分流包 `catch_unwind`，锁毒化用 `into_inner` 恢复、清空组句放行当键。
 - 组件 XML 在 `apps/linux/data/app.qingjian.ibus.xml`（`@BIN_DIR@` 占位）；开发安装 `apps/linux/scripts/install-dev.sh`
   （替换路径、装进 `/usr/share/ibus/component/`、`ibus write-cache && ibus restart`）。
+- 发行版打包在 `apps/linux/packaging/`（Fedora RPM spec 与 Arch PKGBUILD，各带 build.sh 从 HEAD 打源码包）：
+  随包数据构建期生成——`dict-convert pack dict` 从仓库自带的 `assets/lexicon/dict.tsv` 快照现打 `dict.qj`、
+  `english.tsv` 直接拷；`lm.qj` 不带（语料不在 git 里，引擎退化一元，正式数据包发布后再补）。引擎二进制
+  Fedora 放 `/usr/libexec`、Arch 放 `/usr/lib/ibus`（各自跟随 ibus-libpinyin 的惯例），XML 的 `@BIN_DIR@` 分开替换。
 - 没做：SetSurroundingText（前文）、SetCapabilities（客户端能力探测）、Property 菜单、按应用配置（ibus 不给应用身份）、
   Shift+数字删候选（mac 壳有 `[shortcut] delete_candidate`，Linux 壳组句中的 Shift+数字仍按直输段处理）、
   个人词库导入导出（学习数据本身是 TSV，API 化待做）。

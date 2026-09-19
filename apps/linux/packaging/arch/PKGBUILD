@@ -1,0 +1,49 @@
+# Arch PKGBUILD。本地构建走同目录的 build.sh（git archive 出源码包再 makepkg）：
+#   apps/linux/packaging/arch/build.sh
+# 真正发布时把 source 换成 release tarball 的 URL 并补 sha256sums。
+
+# Maintainer: ibus-qingjian fork <https://github.com/cyrasafia/ibus-qingjian>
+pkgname=ibus-qingjian
+# 与 apps/linux/Cargo.toml 同步维护（0.1.4-dev 打成 0.1.4）
+pkgver=0.1.4
+pkgrel=1
+pkgdesc='青简输入法的 ibus 引擎：全拼 / 双拼，原生候选窗'
+arch=('x86_64' 'aarch64')
+url='https://github.com/cyrasafia/ibus-qingjian'
+license=('GPL-3.0-or-later')
+depends=('ibus')
+makedepends=('cargo')
+install=ibus-qingjian.install
+source=("ibus-qingjian-$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+    cd "ibus-qingjian-$pkgver"
+    # 只构建要装的成员（workspace 里的 macOS 壳在 Linux 上编译不过）
+    cargo build --release --locked -p qingjian-linux -p qingjian-dict-convert
+    # 词库在构建期从仓库自带的词表快照打成 .qj（mmap 加载）；语言模型语料不在源码树里，不带
+    cargo run --release -q -p qingjian-dict-convert -- pack dict \
+        --input assets/lexicon/dict.tsv \
+        --name "青简基础词库" \
+        --license "MIT AND Unicode-3.0" \
+        --attribution "通用规范汉字表；现代汉语常用词表（liuxilu 校对版）；THUOCL（清华大学自然语言处理实验室，MIT）；读音 Unihan（Unicode）" \
+        --source https://github.com/qingjian-team/qingjian/tree/main/assets/lexicon
+    # 组件 XML 的占位符换成实际路径与版本
+    sed -e "s|@BIN_DIR@|/usr/lib/ibus|g" -e "s|@VERSION@|$pkgver|g" \
+        apps/linux/data/app.qingjian.ibus.xml > app.qingjian.ibus.xml
+}
+
+package() {
+    cd "ibus-qingjian-$pkgver"
+    # 引擎放 /usr/lib/ibus/（对齐 ibus-rime / ibus-libpinyin 的 Arch 打包惯例）
+    install -Dm755 target/release/ibus-engine-qingjian \
+        "$pkgdir/usr/lib/ibus/ibus-engine-qingjian"
+    install -Dm644 app.qingjian.ibus.xml \
+        "$pkgdir/usr/share/ibus/component/app.qingjian.ibus.xml"
+    install -Dm644 data/generated/dict.qj \
+        "$pkgdir/usr/share/qingjian/dict.qj"
+    install -Dm644 assets/lexicon/english.tsv \
+        "$pkgdir/usr/share/qingjian/english.tsv"
+    install -Dm644 LICENSE \
+        "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

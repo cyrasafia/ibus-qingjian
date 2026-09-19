@@ -132,6 +132,7 @@ Core 跑独立 Server 进程（Unix socket 复用 `qingjian-platform` 协议）�
 |---|---|
 | 代码 | `apps/linux`（package 名 `qingjian-linux`，二进制名 `ibus-engine-qingjian`） |
 | 组件 XML | `apps/linux/data/app.qingjian.ibus.xml`；`<name>` 与进程内 request 的 D-Bus 名一致（`app.qingjian.ibus`，daemon 按 NameOwnerChanged 绑进程）；安装到 `/usr/share/ibus/component/`（`scripts/install-dev.sh` 替换 `@BIN_DIR@` 后装入） |
+| 发行版打包 | `apps/linux/packaging/`：Fedora spec（`/usr/libexec`）与 Arch PKGBUILD（`/usr/lib/ibus`）+ 各自 build.sh，数据构建期从 `assets/lexicon` 生成（`lm.qj` 暂不带），见该目录 README |
 | 配置 | `~/.config/qingjian/config.toml`（60 秒 mtime 热加载，随学习数据落盘任务一起） |
 | 学习数据 | `~/.local/share/qingjian/`（六张 TSV 原样） |
 | 随包数据 | `$QINGJIAN_DATA_DIR` → `/usr/share/qingjian/`（dict.qj / lm.qj / english.tsv；开发时把环境变量指到仓库 `assets/lexicon/` 即可用现有 TSV） |

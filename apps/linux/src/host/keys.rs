@@ -185,13 +185,15 @@ pub fn handle_char(
                 return Outcome::consumed();
             }
             c if c == page_previous => {
-                session.turn_page(-1, page_size);
-                engine.note_page_turn();
+                if session.turn_page(-1, page_size) {
+                    engine.note_page_turn();
+                }
                 return Outcome::redrawn();
             }
             c if c == page_next => {
-                session.turn_page(1, page_size);
-                engine.note_page_turn();
+                if session.turn_page(1, page_size) {
+                    engine.note_page_turn();
+                }
                 return Outcome::redrawn();
             }
             // 其他字符：把当前高亮候选上屏，再按非组句状态处理这个字符（通常是标点）
@@ -244,14 +246,16 @@ fn handle_english_char(
         return Outcome::consumed();
     }
     if composing && c == page_previous {
-        session.turn_page(-1, page_size);
-        engine.note_page_turn();
-        return Outcome::consumed();
+        if session.turn_page(-1, page_size) {
+            engine.note_page_turn();
+        }
+        return Outcome::redrawn();
     }
     if composing && c == page_next {
-        session.turn_page(1, page_size);
-        engine.note_page_turn();
-        return Outcome::consumed();
+        if session.turn_page(1, page_size) {
+            engine.note_page_turn();
+        }
+        return Outcome::redrawn();
     }
     let mut outcome = if composing && c == ' ' {
         commit_highlighted(engine, session)
@@ -284,13 +288,7 @@ pub fn handle_command(
         }
         return Outcome::passed();
     }
-    if key == CommandKey::Backspace {
-        engine.backspace();
-        Outcome::consumed()
-    } else if key == CommandKey::Delete {
-        engine.delete_forward();
-        Outcome::consumed()
-    } else if key != CommandKey::Escape
+    if key != CommandKey::Escape
         && let Some(mark) = engine.restore_bare_question(engine.english_mode())
     {
         // 缓冲区里只有一个 `?` 而用户按了命令键：把它还原成问号上屏（中文遵循标点设置、英文半角）、清空缓冲区。
@@ -298,49 +296,70 @@ pub fn handle_command(
         let mut outcome = Outcome::consumed();
         outcome.commits.push(mark);
         outcome.handled = key == CommandKey::Enter;
-        outcome
-    } else if key == CommandKey::Enter {
-        commit_raw(engine)
-    } else if key == CommandKey::Escape {
-        engine.clear();
-        Outcome::consumed()
-    } else if key == CommandKey::Tab {
-        // 英文模式 Tab 选中高亮的词；中文模式没有整句补全，当翻页
-        if engine.english_mode() {
-            commit_highlighted(engine, session)
-        } else {
-            session.turn_page(1, page_size);
-            engine.note_page_turn();
+        return outcome;
+    }
+    match key {
+        CommandKey::Backspace => {
+            engine.backspace();
+            Outcome::consumed()
+        }
+        CommandKey::Delete => {
+            engine.delete_forward();
+            Outcome::consumed()
+        }
+        CommandKey::Enter => commit_raw(engine),
+        CommandKey::Escape => {
+            engine.clear();
+            Outcome::consumed()
+        }
+        CommandKey::Tab => {
+            // 英文模式 Tab 选中高亮的词；中文模式没有整句补全，当翻页
+            if engine.english_mode() {
+                commit_highlighted(engine, session)
+            } else {
+                if session.turn_page(1, page_size) {
+                    engine.note_page_turn();
+                }
+                Outcome::redrawn()
+            }
+        }
+        CommandKey::Up => {
+            session.move_highlight(-1);
             Outcome::redrawn()
         }
-    } else if key == CommandKey::Up {
-        session.move_highlight(-1);
-        Outcome::redrawn()
-    } else if key == CommandKey::Down {
-        session.move_highlight(1);
-        Outcome::redrawn()
-    } else if key == CommandKey::Left {
-        engine.move_cursor_left();
-        Outcome::consumed()
-    } else if key == CommandKey::Right {
-        engine.move_cursor_right();
-        Outcome::consumed()
-    } else if key == CommandKey::Home {
-        engine.move_cursor_home();
-        Outcome::consumed()
-    } else if key == CommandKey::End {
-        engine.move_cursor_end();
-        Outcome::consumed()
-    } else if key == CommandKey::PageUp {
-        session.turn_page(-1, page_size);
-        engine.note_page_turn();
-        Outcome::redrawn()
-    } else if key == CommandKey::PageDown {
-        session.turn_page(1, page_size);
-        engine.note_page_turn();
-        Outcome::redrawn()
-    } else {
-        Outcome::consumed()
+        CommandKey::Down => {
+            session.move_highlight(1);
+            Outcome::redrawn()
+        }
+        CommandKey::Left => {
+            engine.move_cursor_left();
+            Outcome::consumed()
+        }
+        CommandKey::Right => {
+            engine.move_cursor_right();
+            Outcome::consumed()
+        }
+        CommandKey::Home => {
+            engine.move_cursor_home();
+            Outcome::consumed()
+        }
+        CommandKey::End => {
+            engine.move_cursor_end();
+            Outcome::consumed()
+        }
+        // 翻页只在真翻到时记数（首页按上一页不算候选质量信号）；只重画不重查
+        CommandKey::PageUp => {
+            if session.turn_page(-1, page_size) {
+                engine.note_page_turn();
+            }
+            Outcome::redrawn()
+        }
+        CommandKey::PageDown => {
+            if session.turn_page(1, page_size) {
+                engine.note_page_turn();
+            }
+            Outcome::redrawn()
+        }
     }
 }
 
@@ -477,6 +496,29 @@ mod tests {
         assert!(driver.tap('2'));
         // 上屏的是第二个候选，非空即通过（候选顺序由 Core 排序决定）
         assert!(!driver.committed().is_empty());
+    }
+
+    #[test]
+    fn english_page_keys_redraw_without_requerying() {
+        // 英文模式自己的翻页分支（handle_english_char）也要走「只重画」：
+        // 走 refresh 会重查并把页位归零，与中文模式同一个坑（2026-09-19 漏改过一次）
+        let mut driver = Driver::new();
+        driver.host.engine.set_english_mode(true);
+        for c in "hell".chars() {
+            driver.tap(c);
+        }
+        let outcome = handle_char(
+            &mut driver.host.engine,
+            &mut driver.host.session,
+            driver.host.page_size,
+            driver.host.page_keys,
+            driver.host.english_candidates,
+            ']',
+        );
+        assert!(
+            outcome.handled && outcome.redraw && !outcome.refresh,
+            "英文模式翻页只重画不重查"
+        );
     }
 
     #[test]

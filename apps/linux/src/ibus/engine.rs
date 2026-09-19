@@ -156,11 +156,12 @@ fn dispatch_inner(host: &mut Host, pressed: PressedKey) -> Outcome {
         Some(Key::Command(command)) => {
             host.break_switch_tap();
             // 组句中的 Shift+Tab 是上一页（对齐 mac 的 Backtab）；组句外是应用的反向 Tab，照常放行。
-            // 翻完直接出「只重画」的结果，不再进 handle_command（那边按 Unknown 处理会触发重查、白翻）
+            // 翻完直接出「只重画」的结果，不再进 handle_command（那边按未知命令处理会触发重查、白翻）
             if command == CommandKey::Tab && state.shift() && !host.engine.composition().is_empty()
             {
-                host.session.turn_page(-1, host.page_size);
-                host.engine.note_page_turn();
+                if host.session.turn_page(-1, host.page_size) {
+                    host.engine.note_page_turn();
+                }
                 return Outcome::redrawn();
             }
             keys::handle_command(&mut host.engine, &mut host.session, host.page_size, command)
@@ -308,8 +309,9 @@ async fn turn_page(engine: &QingjianEngine, se: SignalEmitter<'_>, delta: isize)
     let frame = {
         let mut host = lock(&engine.host);
         let page_size = host.page_size;
-        host.session.turn_page(delta, page_size);
-        host.engine.note_page_turn();
+        if host.session.turn_page(delta, page_size) {
+            host.engine.note_page_turn();
+        }
         present::frame_of(&host)
     };
     present::send_frame(&se, &frame).await;

@@ -99,7 +99,7 @@ zbus 直连再分两步走：
 
 壳只做架构约束允许的两件事：
 
-- **按键**：keysym + state → Core 的按键输入；Core 的帧 → `UpdatePreeditText` + `UpdateAuxiliaryText` + `UpdateLookupTable`；上屏 → `CommitText`。观感落点（真机验证后定，2026-09-19）：内联 preedit 显示拼音 marked text（带 `'` 分隔与字符光标，同 mac 壳、光标编辑直接可见），**辅助行同帧再发一遍拼音**——主流 ibus 引擎（libpinyin 等）都发辅助行，不支持内联 preedit 的客户端（XIM、未声明能力的 text-input 路径）只有这条路能看到拼音；代价是内联可见的客户端会看到应用内与候选窗各一份拼音，观感取舍真机再调。候选表只放候选文本，排布方向按 `[general] layout` 显式下发（gnome-shell 把 `System` 当竖排处理、不回退系统设置，缺省发 `System` 等于横排永不生效）。
+- **按键**：keysym + state → Core 的按键输入；Core 的帧 → `UpdatePreeditText` + `UpdateAuxiliaryText` + `UpdateLookupTable`；上屏 → `CommitText`。观感落点（真机验证过，2026-09-19）：内联 preedit 显示拼音 marked text（带 `'` 分隔与字符光标，同 mac 壳、光标编辑直接可见），**辅助行同帧再发一遍拼音**——主流 ibus 引擎（libpinyin 等）都发辅助行，不支持内联 preedit 的客户端（XIM、未声明能力的 text-input 路径）只有这条路能看到拼音；代价是内联可见的客户端会看到应用内与候选窗各一份拼音，观感能否接受真机继续用下来再定。候选表只放候选文本，排布方向按 `[general] layout` 显式下发（gnome-shell 把 `System` 当竖排处理、不回退系统设置，缺省发 `System` 等于横排永不生效）。
 - **进程模型**：ibus 会为每个 input context 各调一次 `CreateEngine`，多个 engine 对象全部转发到**进程级单例 Core `Engine`**（同 mac 壳 `host.rs` 的模式），`focus_in` 只切活跃对象。
 - 双拼小鹤：`[general] shuangpin = "flypy"`，Core 已有，无壳侧逻辑。
 - 依赖树只带 core / dictionary / lm / learning / format / platform；**translate / predict / neural / render 全部不进**——Core 的 `Translator` / `Predictor` trait 留空实现，候选照常出（mac/win 壳做不到这么干净，Linux 壳反而最贴「平台只是壳」）。
@@ -184,7 +184,8 @@ MVP 已落地（`apps/linux`，实现要点见 `docs/notes/crate-notes.md`「app
 - [x] 数据与路径：XDG 配置 / 学习数据、`$QINGJIAN_DATA_DIR` 随包数据（开发指 `assets/lexicon`）、60 秒落盘 + 配置热加载
 - [x] panic 边界（`catch_unwind` + 锁毒化恢复）、组件 XML + `install-dev.sh`
 - [x] 测试：keymap 翻译、会话分页 / 高亮 / 数字选格、带真实 Engine 的按键流（样例词库）、排布方向映射
-- [ ] 真机验收：GNOME+Wayland 上的候选窗观感、内联 preedit、光标定位、journal 日志（横排与辅助行两处修复待真机确认）
+- [x] 真机验证（2026-09-19，GNOME+Wayland）：横排 / 竖排随 `[general] layout` 生效，preedit 与辅助行拼音可见
+- [ ] 真机验收余项：候选窗观感细节、光标定位跟随、journal 日志、各客户端类型（GTK3 / XIM / Electron）覆盖
 - [ ] 个人词库导入导出（学习数据是 TSV，先能手工拷贝；CLI 子命令 API 化待做）
 - [ ] SetSurroundingText（前文，联想 / 重排要用时再接）、SetCapabilities 探测、Property 菜单
 - [ ] `[dictionaries]` 附加词库与 `[general] input_log` 输入日志未接（配置里写了不生效，见 crate-notes）；

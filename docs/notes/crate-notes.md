@@ -239,12 +239,17 @@ ibus 引擎（本 fork 新增，GNOME+Wayland+ibus 的 MVP，设计见 `docs/des
   随包数据构建期生成——`dict-convert pack dict` 从仓库自带的 `assets/lexicon/dict.tsv` 快照现打 `dict.qj`、
   `english.tsv` 直接拷；`lm.qj` 不带（语料不在 git 里，引擎退化一元，正式数据包发布后再补）。引擎二进制
   Fedora 放 `/usr/libexec`、Arch 放 `/usr/lib/ibus`（各自跟随 ibus-libpinyin 的惯例），XML 的 `@BIN_DIR@` 分开替换。
+- 附加词库（`host/dictionaries.rs`，2026-09-19 接线）：随包领域词库 `/usr/share/qingjian/dicts`（打包装 `assets/lexicon/dicts/*.tsv`，
+  目录加载直接认 TSV）+ 用户目录 `~/.local/share/qingjian/dicts/`，`extra_dictionaries::load` 按配置装配；
+  启动装一次（`Host::new` → `reload_dictionaries`），`[dictionaries]` 开关变化随 `apply_config` 重装
+  （受 60 秒配置轮询节拍，最迟约一分钟生效），用户目录文件增删 / 同名更新由主循环 1 秒节拍的
+  `poll_dictionaries` 快照比对发现（与 Windows Server 同一语义；装配在锁内解析正文，大词库导入后那一拍按键会等它）。
 - 没做：SetSurroundingText（前文）、SetCapabilities（客户端能力探测）、Property 菜单、按应用配置（ibus 不给应用身份）、
   Shift+数字删候选（mac 壳有 `[shortcut] delete_candidate`，Linux 壳组句中的 Shift+数字仍按直输段处理）、
   个人词库导入导出（学习数据本身是 TSV，API 化待做）。用户词库的脚本级导入 / 更新 / 删除与迁移坑见
-  [dictionary-import.md](dictionary-import.md)（`dicts/` 目录与 `[dictionaries]` 接线后即生效）。
-- 配置覆盖面：`traditional` / `english_candidates` / `log_level`（启动时读）都已接；共享模板里还有
-  `[dictionaries]`（附加词库 / 领域词库开关）与 `[general] input_log`（输入日志）两项**未接**——配置文件里写了不生效；
+  [dictionary-import.md](dictionary-import.md)。
+- 配置覆盖面：`traditional` / `english_candidates` / `log_level`（启动时读）与 `[dictionaries]`（附加词库 / 领域词库开关）都已接；
+  共享模板里 `[general] input_log`（输入日志）仍**未接**——配置文件里写了不生效；
   主题 / 外观 / preedit 模式各项对 ibus 原生候选窗无意义（观感随系统）。
 
 ## apps/windows

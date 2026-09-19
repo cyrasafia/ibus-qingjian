@@ -44,6 +44,9 @@ package() {
         "$pkgdir/usr/share/qingjian/dict.qj"
     install -Dm644 assets/lexicon/english.tsv \
         "$pkgdir/usr/share/qingjian/english.tsv"
+    # 领域词库 11 本（THUOCL，MIT）：目录加载直接认 TSV，不用构建期转 .qj
+    install -d "$pkgdir/usr/share/qingjian/dicts"
+    install -Dm644 -t "$pkgdir/usr/share/qingjian/dicts" assets/lexicon/dicts/*.tsv
     install -Dm644 LICENSE \
         "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

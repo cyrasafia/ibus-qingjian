@@ -5,6 +5,7 @@
 //! 会话状态跟着它走（与 mac 壳 `host` 的进程单例同一思路）。
 //! 并发由 `Arc<Mutex<Host>>` 保证：方法回调都在 zbus 的 tokio 线程池里进来。
 
+pub mod dictionaries;
 pub mod init;
 pub mod keys;
 pub mod paths;
@@ -12,7 +13,7 @@ pub mod session;
 pub mod settings;
 
 use qingjian_core::Engine;
-use qingjian_platform::{DEFAULT_PAGE_KEYS, LayoutMode, Scheme, SwitchKey};
+use qingjian_platform::{DEFAULT_PAGE_KEYS, DictionariesConfig, LayoutMode, Scheme, SwitchKey};
 
 use self::session::Session;
 use self::settings::Settings;
@@ -59,20 +60,33 @@ pub struct Host {
     /// 英文模式给不给候选（配置 `[general] english_candidates`）：关掉就是纯直通。
     pub english_candidates: bool,
 
+    /// 附加词库是按哪份 `[dictionaries]` 装的；开关变了才重新加载。
+    pub(super) applied_dictionaries: DictionariesConfig,
+
+    /// 用户导入词库目录最近的文件快照（路径、修改时间、长度）；变了才重新加载。
+    pub(super) dictionary_files: Vec<(std::path::PathBuf, Option<std::time::SystemTime>, u64)>,
+
     /// 切换键单击检测：按下后到抬起之间没插进别的键就是一次单击。
     switch_tap_pending: bool,
 }
 
 impl Host {
-    /// 组装：建 Engine、读配置文件并应用。
+    /// 组装：建 Engine、读配置文件并应用、装一次附加词库。
     pub fn new() -> Result<Self, HostError> {
         let engine = init::build_engine()?;
         let settings = Settings::load(&paths::config_path());
-        Ok(Self::with_settings(engine, settings))
+        let mut host = Self::with_settings(engine, settings);
+        // 附加词库启动装一次：基线已在 with_settings 预记为当前配置，apply_config 没装过，这里无条件装
+        host.reload_dictionaries();
+        Ok(host)
     }
 
     /// 拿现成 Engine 与配置状态建 Host。
+    ///
+    /// 附加词库的基线按当前配置预记，首次 apply_config 因而不装配：
+    /// 生产路径由 [`Self::new`] 装一次，测试构造（with_engine*）不碰词库目录。
     fn with_settings(engine: Engine, settings: Settings) -> Self {
+        let applied_dictionaries = settings.config().dictionaries.clone();
         let mut host = Self {
             engine,
             settings,
@@ -83,6 +97,8 @@ impl Host {
             switch_key: SwitchKey::default(),
             english_mode_enabled: true,
             english_candidates: true,
+            applied_dictionaries,
+            dictionary_files: Vec::new(),
             switch_tap_pending: false,
         };
         host.apply_config();
@@ -90,6 +106,9 @@ impl Host {
     }
 
     /// 拿现成 Engine 建 Host（测试用）：默认配置、不碰配置文件。
+    ///
+    /// 默认配置的 `[dictionaries]` 与基线相等，附加词库不装配；注意传非默认 `[dictionaries]`
+    /// 的测试会让 apply_config 读写真实的随包与用户词库目录，测试里别这么配。
     #[cfg(test)]
     pub fn with_engine(engine: Engine) -> Self {
         Self::with_settings(
@@ -99,6 +118,8 @@ impl Host {
     }
 
     /// 拿现成 Engine 与指定配置建 Host（测试用）：不碰配置文件。
+    ///
+    /// 隔离边界同 [`Self::with_engine`]：不要在配置里改 `[dictionaries]`。
     #[cfg(test)]
     pub fn with_engine_and_config(engine: Engine, config: qingjian_platform::Config) -> Self {
         Self::with_settings(engine, Settings::with_config(config))
@@ -132,6 +153,10 @@ impl Host {
             }
             other => other,
         };
+        // 词库开关变了才重新装配；文件增删走轮询的 poll_dictionaries
+        if config.dictionaries != self.applied_dictionaries {
+            self.reload_dictionaries();
+        }
     }
 
     /// 拼音侧方案：这个壳只做全拼与双拼，注音 / 形码不在范围。

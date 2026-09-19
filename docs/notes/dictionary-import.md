@@ -57,8 +57,9 @@ Windows 在设置页 `remove_user_dict`。脚本等价操作：把 `dicts/<名>.
 8. **坏文件不拖垮输入法**：目录里解析失败的文件只记日志跳过。导入「成功」不代表每条都能打——见第 4 条音节校验。
 9. **配置坏时词库沿用上次有效开关**：`[dictionaries]` 解析失败时已加载的词库不卸载；修好配置自动恢复。脚本改配置
    注意保留 TOML 结构（`Config::set_value` / `set_array` 而不是整个重写）。
-10. **Linux 壳还没接线**（本 fork 待办）：`apps/linux` 未调 `Engine::set_extra_dictionaries`，`[dictionaries]` 写了不生效、
-    `dicts/` 放了不加载。脚本可以先把文件放到位，接线完成后即全部生效。接线照 `apps/windows/server/src/dispatch/reload` 抄即可
-    （`extra_dictionaries::load` + 轮询 `snapshot`）。
+10. **Linux 壳已接线**（2026-09-19，`apps/linux/src/host/dictionaries.rs`）：`dicts/` 目录与 `[dictionaries]`
+    已生效——用户目录文件增删 / 同名更新约一秒内自动重载，开关变化随配置热加载。随包领域词库目录
+    `/usr/share/qingjian/dicts`（打包从 `assets/lexicon/dicts/*.tsv` 装，直接认 TSV）。设置 UI（导入 / 移除 / 开关页面）
+    Linux 壳还没有，脚本与手工操作见上文。
 11. **导入词库不带语言模型**：附加词库的词在整句里按 `sentence::fallback_log_prob` 兜底打分，只影响「有没有」与词频，
     不改变整句权重尺度。几十万条的巨型词库导进来不会让整句变聪明，但会增内存与查询面，按需拆分。

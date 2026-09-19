@@ -83,8 +83,10 @@ fn run() -> Result<(), String> {
     })
 }
 
-/// 激活期间的定时事务：每 60 秒把学习数据落盘（有新数据时才是真活），顺带热加载配置。
+/// 激活期间的定时事务：每 60 秒把学习数据落盘（有新数据时才是真活），顺带热加载配置；
+/// 另一个 1 秒节拍轮询用户词库目录（导入 / 移除 / 同名更新，约一秒内生效）。
 fn periodic_tasks(host: Arc<Mutex<Host>>) {
+    let host_for_dicts = Arc::clone(&host);
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
         loop {
@@ -102,6 +104,16 @@ fn periodic_tasks(host: Arc<Mutex<Host>>) {
                 continue;
             };
             host.engine.flush_learning();
+        }
+    });
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
+        loop {
+            interval.tick().await;
+            let Ok(mut host) = host_for_dicts.lock() else {
+                continue;
+            };
+            host.poll_dictionaries();
         }
     });
 }

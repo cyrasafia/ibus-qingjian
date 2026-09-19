@@ -21,6 +21,25 @@ pub fn user_data_dir() -> PathBuf {
     dir
 }
 
+/// 随包领域词库目录：`bundled_file` 的目录版，`dicts/` 存在才返回 `Some`。
+pub fn bundled_dicts_dir() -> Option<PathBuf> {
+    let candidates = match std::env::var_os("QINGJIAN_DATA_DIR") {
+        Some(dir) => vec![PathBuf::from(dir).join("dicts")],
+        None => vec![
+            PathBuf::from("/usr/share/qingjian/dicts"),
+            PathBuf::from("/usr/lib/qingjian/dicts"),
+        ],
+    };
+    candidates.into_iter().find(|dir| dir.is_dir())
+}
+
+/// 用户导入词库目录 `~/.local/share/qingjian/dicts/`，不存在则创建；建不了当没有。
+pub fn user_dicts_dir() -> Option<PathBuf> {
+    let dir = user_data_dir().join("dicts");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir)
+}
+
 /// 随包数据文件：`$QINGJIAN_DATA_DIR` 优先，否则 `/usr/share/qingjian/`；不存在为 `None`。
 pub fn bundled_file(name: &str) -> Option<PathBuf> {
     let candidates = match std::env::var_os("QINGJIAN_DATA_DIR") {

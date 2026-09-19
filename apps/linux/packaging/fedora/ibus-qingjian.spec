@@ -15,8 +15,8 @@ Summary:        Qingjian pinyin input method engine for IBus
 
 License:        GPL-3.0-or-later
 # 上面的 License 只算了代码。随包数据自带许可（pack 命令把元数据打进了 .qj）：
-# dict.qj 是 MIT AND Unicode-3.0、english.tsv 见 assets/lexicon/README.md。
-# 本地 dnf install 装着用没关系；要是哪天提交进 Fedora 官方仓库，License 字段要写成
+# dict.qj 是 MIT AND Unicode-3.0、english.tsv 与领域词库 dicts/*.tsv（THUOCL）见 assets/lexicon/README.md。
+# 本地 dnf install 装着用没问题；要是哪天提交进 Fedora 官方仓库，License 字段要写成
 # GPL-3.0-or-later AND MIT AND Unicode-3.0（英文词表的许可核对后并入）。
 URL:            https://github.com/cyrasafia/ibus-qingjian
 Source0:        %{name}-%{version}.tar.gz
@@ -57,6 +57,9 @@ install -Dm644 data/generated/dict.qj \
     %{buildroot}%{_datadir}/qingjian/dict.qj
 install -Dm644 assets/lexicon/english.tsv \
     %{buildroot}%{_datadir}/qingjian/english.tsv
+# 领域词库 11 本（THUOCL，MIT）：目录加载直接认 TSV，不用构建期转 .qj
+install -d %{buildroot}%{_datadir}/qingjian/dicts
+install -Dm644 -t %{buildroot}%{_datadir}/qingjian/dicts assets/lexicon/dicts/*.tsv
 
 %post
 # 刷新 ibus 组件缓存；ibus 还没跑起来时失败也无妨（下次 ibus restart 会再刷）
@@ -73,6 +76,7 @@ ibus write-cache >/dev/null 2>&1 || :
 %dir %{_datadir}/qingjian
 %{_datadir}/qingjian/dict.qj
 %{_datadir}/qingjian/english.tsv
+%{_datadir}/qingjian/dicts
 
 %changelog
 * Fri Sep 18 2026 ibus-qingjian packager <noreply@example.com> - 0.1.4-1

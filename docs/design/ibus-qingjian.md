@@ -188,5 +188,7 @@ MVP 已落地（`apps/linux`，实现要点见 `docs/notes/crate-notes.md`「app
 - [ ] 真机验收余项：候选窗观感细节、光标定位跟随、journal 日志、各客户端类型（GTK3 / XIM / Electron）覆盖
 - [ ] 个人词库导入导出（学习数据是 TSV，先能手工拷贝；CLI 子命令 API 化待做）
 - [ ] SetSurroundingText（前文，联想 / 重排要用时再接）、SetCapabilities 探测、Property 菜单
-- [ ] `[dictionaries]` 附加词库与 `[general] input_log` 输入日志未接（配置里写了不生效，见 crate-notes）；
+- [x] 附加词库接线（2026-09-19）：随包领域词库 + 用户 `dicts/` 目录（`host/dictionaries.rs`），
+      `[dictionaries]` 开关热加载、目录文件增删 / 更新 1 秒轮询发现；打包带 `assets/lexicon/dicts/*.tsv`
+- [ ] `[general] input_log` 输入日志未接（配置里写了不生效，见 crate-notes）；
       `docs/user/` 用户文档未动（fork 尚未建 Linux 用户文档，真机验收后再写）

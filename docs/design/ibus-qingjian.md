@@ -99,7 +99,7 @@ zbus 直连再分两步走：
 
 壳只做架构约束允许的两件事：
 
-- **按键**：keysym + state → Core 的按键输入；Core 的帧 → `UpdatePreeditText` + `UpdateLookupTable`；上屏 → `CommitText`。观感落点（实现时定）：内联 preedit 显示拼音 marked text（带 `'` 分隔与字符光标，同 mac 壳、光标编辑直接可见），候选表只放候选文本；辅助行 MVP 不用（原计划的「内联转换文本 + 辅助行拼音」会让拼音光标没有可视落点，真机跑起来再调）。
+- **按键**：keysym + state → Core 的按键输入；Core 的帧 → `UpdatePreeditText` + `UpdateAuxiliaryText` + `UpdateLookupTable`；上屏 → `CommitText`。观感落点（真机验证后定，2026-09-19）：内联 preedit 显示拼音 marked text（带 `'` 分隔与字符光标，同 mac 壳、光标编辑直接可见），**辅助行同帧再发一遍拼音**——主流 ibus 引擎（libpinyin 等）都发辅助行，不支持内联 preedit 的客户端（XIM、未声明能力的 text-input 路径）只有这条路能看到拼音；代价是内联可见的客户端会看到应用内与候选窗各一份拼音，观感取舍真机再调。候选表只放候选文本，排布方向按 `[general] layout` 显式下发（gnome-shell 把 `System` 当竖排处理、不回退系统设置，缺省发 `System` 等于横排永不生效）。
 - **进程模型**：ibus 会为每个 input context 各调一次 `CreateEngine`，多个 engine 对象全部转发到**进程级单例 Core `Engine`**（同 mac 壳 `host.rs` 的模式），`focus_in` 只切活跃对象。
 - 双拼小鹤：`[general] shuangpin = "flypy"`，Core 已有，无壳侧逻辑。
 - 依赖树只带 core / dictionary / lm / learning / format / platform；**translate / predict / neural / render 全部不进**——Core 的 `Translator` / `Predictor` trait 留空实现，候选照常出（mac/win 壳做不到这么干净，Linux 壳反而最贴「平台只是壳」）。
@@ -157,11 +157,11 @@ Core 侧改动照旧先跑 `qingjian-cli`；壳层手测用一个 GTK 应用（g
 - **多 input context 并发**：两个应用交替打字时共享同一个 Core 组合态的行为要定。倾向 `focus_out` 清组合（ibus 引擎惯例），mac 壳是切输入源才收窗——两者取舍实现时验证。
 - **引擎收不到应用身份**：ibus 不把 app id 告诉引擎（X11 下还能自己查焦点窗口，Wayland 下没有途径），`[apps] english_candidates_off` 这类按应用配置在 ibus 壳没有数据来源；MVP 不做按应用行为，需要时再议（如仅 X11 支持或砍掉该功能）。
 - **ibus 版本差异**：1.5.x 之间有 `FocusInId` 这类新增方法；目标只认 1.5.29 一线（Arch 当前版本）。
-- **客户端不支持内联 preedit**（`SetCapabilities` 没给 PREEDIT_TEXT）：回退成辅助行显示拼音 + preedit 只进候选窗。MVP 可以先不处理，遇到再说。
+- **客户端不支持内联 preedit**（`SetCapabilities` 没给 PREEDIT_TEXT）：daemon 把 preedit 转给面板显示（gnome-shell 的候选窗有 preedit 行），引擎侧的兜底是辅助行拼音（已发）。
 - **候选窗观感完全交给 GNOME**：不能自定义字体间距主题（既定取舍，换主题是系统的事）。
 - **librush 维护度**：个人项目、更新不勤；好在协议层小，出问题就内化，不构成架构风险。
 
-## 实现状态（2026-09-18）
+## 实现状态（2026-09-19）
 
 MVP 已落地（`apps/linux`，实现要点见 `docs/notes/crate-notes.md`「apps/linux」）：
 
@@ -173,10 +173,18 @@ MVP 已落地（`apps/linux`，实现要点见 `docs/notes/crate-notes.md`「app
 - [x] Ctrl / Alt / Super 组合放行（组句中先原样上屏再放行，缓冲不丢）
 - [x] 候选窗交互：`CandidateClicked`（页内下标换算）、`PageUp` / `PageDown` / `CursorUp` / `CursorDown`（鼠标滚轮）
 - [x] 失焦 / 停用 = 拼音原样上屏 + 断链；`Reset` = 清空
+- [x] 排布方向按 `[general] layout` 显式下发（2026-09-19）：gnome-shell 把 `System` 当竖排、不回退 gsettings，
+      librush 缺省恰是 `System`——不显式下发横排永远立不起来。librush 0.2.3 没导出 `IBusOrientation` 类型，
+      走 `vendor/librush` 补一行 re-export（根 Cargo.toml 的 `[patch.crates-io]`，上游收了就撤）
+- [x] 辅助行拼音兜底（2026-09-19）：同帧把拼音发 `UpdateAuxiliaryText`，无内联 preedit 能力的客户端
+      （XIM / 部分 text-input 路径）在候选窗里也有拼音可看——同日定位真机上「preedit 无法显示」
+- [x] headless 集成测试台 `apps/linux/tests/`（2026-09-19）：独立 socket + 独立 HOME 起真 ibus-daemon 与引擎，
+      python GI 模拟 GTK 客户端逐键打字断言 preedit / 辅助行 / 候选方向 / 上屏。**教训：测试客户端逐键必须
+      异步 + 主循环空转，同步调用夹 `sleep` 会把 GDBus 信号分发饿死，看起来像引擎丢信号**
 - [x] 数据与路径：XDG 配置 / 学习数据、`$QINGJIAN_DATA_DIR` 随包数据（开发指 `assets/lexicon`）、60 秒落盘 + 配置热加载
 - [x] panic 边界（`catch_unwind` + 锁毒化恢复）、组件 XML + `install-dev.sh`
-- [x] 测试：keymap 翻译、会话分页 / 高亮 / 数字选格、带真实 Engine 的按键流（样例词库）
-- [ ] 真机验收：GNOME+Wayland 上的候选窗观感、内联 preedit、光标定位、journal 日志（开发机无图形环境，待装机验证）
+- [x] 测试：keymap 翻译、会话分页 / 高亮 / 数字选格、带真实 Engine 的按键流（样例词库）、排布方向映射
+- [ ] 真机验收：GNOME+Wayland 上的候选窗观感、内联 preedit、光标定位、journal 日志（横排与辅助行两处修复待真机确认）
 - [ ] 个人词库导入导出（学习数据是 TSV，先能手工拷贝；CLI 子命令 API 化待做）
 - [ ] SetSurroundingText（前文，联想 / 重排要用时再接）、SetCapabilities 探测、Property 菜单
 - [ ] `[dictionaries]` 附加词库与 `[general] input_log` 输入日志未接（配置里写了不生效，见 crate-notes）；

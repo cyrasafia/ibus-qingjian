@@ -12,7 +12,7 @@ pub mod session;
 pub mod settings;
 
 use qingjian_core::Engine;
-use qingjian_platform::{DEFAULT_PAGE_KEYS, Scheme, SwitchKey};
+use qingjian_platform::{DEFAULT_PAGE_KEYS, LayoutMode, Scheme, SwitchKey};
 
 use self::session::Session;
 use self::settings::Settings;
@@ -42,6 +42,9 @@ pub struct Host {
 
     /// 每页候选数（配置 `[general] page_size`）。
     pub page_size: usize,
+
+    /// 候选窗排布（配置 `[general] layout`）：竖排 / 横排，随 LookupTable 下发给面板。
+    pub layout: LayoutMode,
 
     /// 翻页键对（配置 `[general] page_keys`）。
     pub page_keys: (char, char),
@@ -75,6 +78,7 @@ impl Host {
             settings,
             session: Session::default(),
             page_size: 9,
+            layout: LayoutMode::default(),
             page_keys: DEFAULT_PAGE_KEYS,
             switch_key: SwitchKey::default(),
             english_mode_enabled: true,
@@ -94,6 +98,12 @@ impl Host {
         )
     }
 
+    /// 拿现成 Engine 与指定配置建 Host（测试用）：不碰配置文件。
+    #[cfg(test)]
+    pub fn with_engine_and_config(engine: Engine, config: qingjian_platform::Config) -> Self {
+        Self::with_settings(engine, Settings::with_config(config))
+    }
+
     /// 把当前配置推给 Engine 与会话参数。启动、热重载都走这一条路。
     pub fn apply_config(&mut self) {
         let config = self.settings.config().clone();
@@ -108,6 +118,7 @@ impl Host {
         self.engine.set_learning(config.general.learning);
         self.apply_scheme(config.general.scheme());
         self.page_size = config.general.page_size();
+        self.layout = config.general.layout;
         self.page_keys = config.general.page_keys();
         self.english_mode_enabled = config.general.english_mode;
         self.english_candidates = config.general.english_candidates;

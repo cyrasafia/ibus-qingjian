@@ -209,8 +209,16 @@ ibus 引擎（本 fork 新增，GNOME+Wayland+ibus 的 MVP，设计见 `docs/des
 - 按键分流在 `host/keys.rs`（照 mac 壳 `imk/controller` 的语义移植，`Outcome { handled, commits, refresh }`），
   纯函数不碰平台 API，测试直接拿样例词库建 Engine 跑按键流。keyval 翻译在 `ibus/keymap.rs`（X keysym，小键盘数字归一）。
 - 呈现在 `ibus/present.rs`：锁内构 `Frame`（preedit 文本 + LookupTable），锁外发 D-Bus 信号。preedit 内联显示拼音
-  （`Query::marked_text` + 字符光标，同 mac 的 marked text）；候选表全量候选 + `page_size` + 高亮光标，
-  分页渲染交给 ibus 原生候选窗；辅助行没用。
+  （`Query::marked_text` + 字符光标，同 mac 的 marked text），**同帧把拼音再发一遍辅助行**（`UpdateAuxiliaryText`，
+  无内联 preedit 能力的客户端靠它在候选窗里看到拼音）；候选表全量候选 + `page_size` + 高亮光标 + 排布方向
+  （`[general] layout` → `IBusOrientation`，gnome-shell 把 `System` 当竖排不回退系统设置，必须显式下发），
+  分页渲染交给 ibus 原生候选窗。发送失败记日志不重试（下一帧整体覆盖）。
+- **librush 走 `vendor/librush`（0.2.3 + 一行 re-export 补丁）**：上游没导出 `IBusOrientation`，壳没法设候选窗方向；
+  根 Cargo.toml `[patch.crates-io]` 指过去，上游收了导出就撤（同 cosmic-text 补丁的规矩）。
+- **headless 集成测试台 `apps/linux/tests/`**：`ibus_harness.py` 起独立 socket + 独立 HOME 的真 ibus-daemon 与引擎
+  （不动真实会话），`ibus_client.py` 用 python GI 模拟 GTK 客户端逐键打字，断言 preedit / 辅助行 / 候选方向 / 上屏。
+  `HARNESS_LAYOUT=horizontal` 可切横排断言。逐键必须 `process_key_event_async` + 主循环空转——同步调用夹 `sleep`
+  会饿死 GDBus 信号分发，看起来像引擎丢信号（2026-09-19 排查半天的教训）。
 - 中英切换：Shift 单击（press 到 release 之间无其他键），切模式时组句原样上屏；Caps Lock 亮 = 纯直通。
   Ctrl/Alt/Super 组合是应用快捷键：组句中先原样上屏再放行。
 - 失焦 / 停用：拼音原样上屏（对齐 Windows 的失焦上屏）+ `break_chain`；停用（被切走，对齐 mac 的 deactivate）时顺带

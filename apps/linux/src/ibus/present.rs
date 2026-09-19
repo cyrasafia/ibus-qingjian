@@ -1,14 +1,17 @@
 //! 呈现：把 Host 的状态翻译成 ibus 的 UI 信号（preedit、候选表、上屏）。
 //!
 //! 分两步：锁内构帧（[`Frame`]，纯数据），锁外发送（await）。preedit 内联在应用里显示拼音
-//! （带 `'` 分隔与光标，与 mac 壳的 marked text 同一内容），候选表交给 ibus 原生候选窗渲染；
-//! 辅助行 MVP 不用。收窗 = 空候选 + 隐藏 preedit。
+//! （带 `'` 分隔与光标，与 mac 壳的 marked text 同一内容）；不支持内联 preedit 的客户端
+//! （XIM、未声明能力的 text-input 路径）由面板兜底显示，但那条路并非所有客户端都走得到，
+//! 所以同帧再把拼音发一遍辅助行（`UpdateAuxiliaryText`）——主流 ibus 引擎都这么做，
+//! 候选窗里始终有拼音落点。收窗 = 空候选 + 隐藏 preedit。
 
-use librush::ibus::{IBusEngineBackend, IBusPreeditFocusMode, LookupTable};
+use librush::ibus::{IBusEngineBackend, IBusOrientation, IBusPreeditFocusMode, LookupTable};
 use zbus::object_server::SignalEmitter;
 
 use super::engine::QingjianEngine;
 use crate::host::Host;
+use qingjian_platform::LayoutMode;
 
 /// 一帧要发的 UI 状态。
 #[derive(Debug)]
@@ -67,24 +70,39 @@ pub fn frame_of(host: &Host) -> Frame {
 }
 
 /// 把一帧发给 ibus。
+///
+/// 发送失败只记日志不重试：ibus 侧下一帧会整体覆盖，丢一帧的观感代价是闪一下旧内容。
 pub async fn send_frame(se: &SignalEmitter<'_>, frame: &Frame) -> bool {
-    let mut all_ok = <QingjianEngine as IBusEngineBackend>::update_preedit_text(
+    let preedit = <QingjianEngine as IBusEngineBackend>::update_preedit_text(
         se,
         frame.preedit.clone(),
         frame.cursor,
         frame.preedit_visible,
         IBusPreeditFocusMode::Clear,
     )
-    .await
-    .is_ok();
-    all_ok &= <QingjianEngine as IBusEngineBackend>::update_lookup_table(
+    .await;
+    if let Err(error) = &preedit {
+        tracing::warn!(%error, preedit = %frame.preedit, "UpdatePreeditText 发不出去");
+    }
+    let aux = <QingjianEngine as IBusEngineBackend>::update_auxiliary_text(
+        se,
+        frame.preedit.clone(),
+        frame.preedit_visible,
+    )
+    .await;
+    if let Err(error) = &aux {
+        tracing::warn!(%error, text = %frame.preedit, "UpdateAuxiliaryText 发不出去");
+    }
+    let table = <QingjianEngine as IBusEngineBackend>::update_lookup_table(
         se,
         &frame.table,
         frame.table_visible,
     )
-    .await
-    .is_ok();
-    all_ok
+    .await;
+    if let Err(error) = &table {
+        tracing::warn!(%error, visible = frame.table_visible, "UpdateLookupTable 发不出去");
+    }
+    preedit.is_ok() && aux.is_ok() && table.is_ok()
 }
 
 /// 依序上屏几段文本。
@@ -104,7 +122,10 @@ pub fn take_raw(host: &mut Host) -> Option<String> {
     (!raw.is_empty()).then_some(raw)
 }
 
-/// 由会话建候选表：全部候选 + 每页大小 + 高亮光标，分页交给 ibus 候选窗。
+/// 由会话建候选表：全部候选 + 每页大小 + 高亮光标 + 排布方向，分页交给 ibus 候选窗。
+///
+/// 方向必须显式下发：gnome-shell 把 `System`（librush 的缺省）当竖排处理、不再回退
+/// 系统设置，不写死用户配置的横排就永远立不起来。
 fn lookup_table(host: &Host) -> LookupTable {
     let texts = host
         .session
@@ -116,5 +137,75 @@ fn lookup_table(host: &Host) -> LookupTable {
     let mut table = LookupTable::new(texts, page_size, true, false)
         .unwrap_or_else(|_| LookupTable::new(Vec::new(), 1, true, false).expect("页大小 1 合法"));
     table.set_cursor_pos(host.session.highlighted() as i64);
+    table.orientation = match host.layout {
+        LayoutMode::Vertical => IBusOrientation::Vertical,
+        LayoutMode::Horizontal => IBusOrientation::Horizontal,
+    };
     table
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use qingjian_core::{Candidate, CandidateKind};
+    use qingjian_platform::Config;
+
+    fn host_with_layout(layout: LayoutMode) -> Host {
+        let dict = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/sample/dict.tsv");
+        let mut config = Config::default();
+        config.general.layout = layout;
+        Host::with_engine_and_config(
+            qingjian_core::Engine::new(
+                qingjian_dictionary::Dictionary::from_path(dict).expect("样例词库读不了"),
+            ),
+            config,
+        )
+    }
+
+    fn candidates() -> Vec<Candidate> {
+        (0..3)
+            .map(|i| Candidate {
+                text: format!("词{i}"),
+                kind: CandidateKind::Chinese,
+                syllables: vec!["a".into()],
+                reading: None,
+                translation: None,
+                aux_code: None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn layout_config_maps_to_lookup_table_orientation() {
+        let mut host = host_with_layout(LayoutMode::Vertical);
+        host.session.reset("nihao".to_owned(), 5, candidates());
+        assert_eq!(lookup_table(&host).orientation, IBusOrientation::Vertical);
+
+        let mut host = host_with_layout(LayoutMode::Horizontal);
+        host.session.reset("nihao".to_owned(), 5, candidates());
+        assert_eq!(lookup_table(&host).orientation, IBusOrientation::Horizontal);
+    }
+
+    #[test]
+    fn frame_hides_everything_when_not_composing() {
+        let mut host = host_with_layout(LayoutMode::Vertical);
+        host.session.clear();
+        let frame = frame_of(&host);
+        assert!(!frame.preedit_visible);
+        assert!(!frame.table_visible);
+    }
+
+    #[test]
+    fn session_reset_feeds_the_frame() {
+        let mut host = host_with_layout(LayoutMode::Horizontal);
+        for c in "ni".chars() {
+            host.engine.push(c);
+        }
+        host.session.reset("ni".to_owned(), 2, candidates());
+        let frame = frame_of(&host);
+        assert!(frame.preedit_visible);
+        assert_eq!(frame.preedit, "ni");
+        assert_eq!(frame.table.candidates().len(), 3);
+        assert!(frame.table_visible);
+    }
 }

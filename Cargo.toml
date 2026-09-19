@@ -98,3 +98,7 @@ windows-registry = "0.6.1"
 # 上游收了就删掉这段回 crates.io。见 docs/design/rendering.md
 [patch.crates-io]
 cosmic-text = { git = "https://github.com/qingjian-team/cosmic-text", rev = "9cf0d65a5e4db381e34907103326673386096be3" }
+
+# librush 0.2.3 导出了 LookupTable::orientation 字段却不导出 IBusOrientation 类型，壳没法设置候选窗方向；
+# vendor 副本只加了一行 re-export。上游（fm-elpac/librush）收了导出就删掉这段回 crates.io。
+librush = { path = "vendor/librush" }

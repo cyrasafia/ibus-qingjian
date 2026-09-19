@@ -1903,8 +1903,6 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 [[package]]
 name = "librush"
 version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a3ae6bdd55e1a9bdb43448e75851d1bf6b021146be5bf37a73b696c0328bcd3"
 dependencies = [
  "arbitrary-int",
  "bitbybit",

@@ -35,16 +35,23 @@ fn lock(host: &Arc<Mutex<Host>>) -> MutexGuard<'_, Host> {
     host.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// 一枚键的完整处理：分流（含 panic 边界）。
-fn dispatch(host: &mut Host, key: PressedKey) -> Outcome {
-    let result = std::panic::catch_unwind(AssertUnwindSafe(|| dispatch_inner(host, key)));
+/// 一枚键的完整处理：分流 + 依结果构帧，两步都在 panic 边界内
+/// （构帧要跑 `query()`，是按键路径上最重的 Core 调用，不能漏在边界外）。
+/// 崩了恢复成清空状态、放行当键、发收窗帧，进程不死。
+fn dispatch(host: &mut Host, key: PressedKey) -> (Outcome, Option<present::Frame>) {
+    let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        let outcome = dispatch_inner(host, key);
+        let frame = outcome.refresh.then(|| present::frame_after_change(host));
+        (outcome, frame)
+    }));
     match result {
-        Ok(outcome) => outcome,
+        Ok(pair) => pair,
         Err(panic) => {
             tracing::error!(panic = ?panic, "按键处理 panic，清空组句放行");
             host.engine.clear();
             host.session.clear();
-            Outcome::passed()
+            let frame = present::frame_after_change(host);
+            (Outcome::passed(), Some(frame))
         }
     }
 }
@@ -67,10 +74,25 @@ fn dispatch_inner(host: &mut Host, pressed: PressedKey) -> Outcome {
             (SwitchKey::Shift, Some(Key::Shift)) | (SwitchKey::Control, Some(Key::Control))
         )
     };
-    // 同一时刻还按着别的显著修饰键（Shift / Ctrl / Alt / Super）= 在组和弦，不是单击
+    // 同一时刻还按着别的显著修饰键（Shift / Ctrl / Alt / Super / Meta / Hyper）= 在组和弦，不是单击；
+    // 与 librush `has_special_modifiers` 的判定面保持一致
     let chorded = |state: IBusModifierState, switch: SwitchKey| match switch {
-        SwitchKey::Shift => state.control() || state.mod1() || state.mod4() || state.super_(),
-        SwitchKey::Control => state.shift() || state.mod1() || state.mod4() || state.super_(),
+        SwitchKey::Shift => {
+            state.control()
+                || state.mod1()
+                || state.mod4()
+                || state.super_()
+                || state.meta()
+                || state.hyper()
+        }
+        SwitchKey::Control => {
+            state.shift()
+                || state.mod1()
+                || state.mod4()
+                || state.super_()
+                || state.meta()
+                || state.hyper()
+        }
         _ => false,
     };
     if state.is_keyup() {
@@ -166,11 +188,7 @@ impl IBusEngine for QingjianEngine {
         };
         let (outcome, frame) = {
             let mut host = lock(&self.host);
-            let outcome = dispatch(&mut host, pressed);
-            let frame = outcome
-                .refresh
-                .then(|| present::frame_after_change(&mut host));
-            (outcome, frame)
+            dispatch(&mut host, pressed)
         };
         if !outcome.commits.is_empty() {
             present::commit_texts(&se, &outcome.commits).await;

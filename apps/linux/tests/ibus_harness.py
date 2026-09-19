@@ -13,11 +13,14 @@
 import os
 import subprocess
 import sys
+import tempfile
 import time
 import xml.etree.ElementTree as ET
 
-TEST = "/tmp/opencode/qingjian-ibus-test"
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+# 每次运行独立临时目录：不绑定机器特定路径，并发跑也不互踩（残留清理按本目录的 socket 路径匹配）
+TEST = tempfile.mkdtemp(prefix="qingjian-ibus-test-")
+print("测试目录:", TEST)
 HOME = f"{TEST}/home"
 SOCK = f"{TEST}/socket"
 COMP_DIR = f"{TEST}/component"

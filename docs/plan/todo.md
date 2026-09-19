@@ -119,6 +119,7 @@
     data Release 传 `model.qjm`，bundle.sh / qingjian.iss 只带一个文件），待 mac 与 box 真机各装一次验加载与重排；
     密码框已按 TSF 规范做（2026-09-12）：`KEYBOARD_DISABLED` compartment 整键放行不组句，`IS_PRIVATE` / 密码 / PIN 输入范围为私密（组句但不学不记不发云端，`ClientMessage::Privacy` → `Engine::set_private`），box 真机验过：Edge 密码框整键放行；InPrivate 网页文本框报 `IS_SEARCH` 不报 `IS_PRIVATE`，私密路径只靠单测覆盖；CI 两个 job 都从 `data` Release 取 `model.qjm`（已做）。
 - [ ] Linux Fcitx5 后续（默认面板与手动安装已实现）：native Wayland 验证、Server 自绘 / GNOME 位图、神经重排、自动启动与打包；配置同步、跨平台词库
+- [x] Linux IBus MVP（2026-09-19：GNOME+Wayland+ibus 壳 `apps/linux`，横排/竖排与辅助行已接，真机验收待做；设计见 `docs/design/ibus-qingjian.md`）；与上游 Fcitx5 栈并行，配置同步、跨平台词库未做
 
 ## 四、其他输入方案
 

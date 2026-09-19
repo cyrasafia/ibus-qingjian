@@ -213,8 +213,9 @@ ibus 引擎（本 fork 新增，GNOME+Wayland+ibus 的 MVP，设计见 `docs/des
   无内联 preedit 能力的客户端靠它在候选窗里看到拼音）；候选表全量候选 + `page_size` + 高亮光标 + 排布方向
   （`[general] layout` → `IBusOrientation`，gnome-shell 把 `System` 当竖排不回退系统设置，必须显式下发），
   分页渲染交给 ibus 原生候选窗。发送失败记日志不重试（下一帧整体覆盖）。
-- **librush 走 `vendor/librush`（0.2.3 + 一行 re-export 补丁）**：上游没导出 `IBusOrientation`，壳没法设候选窗方向；
-  根 Cargo.toml `[patch.crates-io]` 指过去，上游收了导出就撤（同 cosmic-text 补丁的规矩）。
+- **librush 走 `vendor/librush`（0.2.3 + 小补丁）**：上游没导出 `IBusOrientation`，壳没法设候选窗方向；
+  补丁两处——导出该类型、加 `PartialEq/Eq`（测试断言要比较）。根 Cargo.toml `[patch.crates-io]` 指过去，
+  上游收了就撤（同 cosmic-text 补丁的规矩）。
 - **headless 集成测试台 `apps/linux/tests/`**：`ibus_harness.py` 起独立 socket + 独立 HOME 的真 ibus-daemon 与引擎
   （不动真实会话），`ibus_client.py` 用 python GI 模拟 GTK 客户端逐键打字，断言 preedit / 辅助行 / 候选方向 / 上屏。
   `HARNESS_LAYOUT=horizontal` 可切横排断言。逐键必须 `process_key_event_async` + 主循环空转——同步调用夹 `sleep`

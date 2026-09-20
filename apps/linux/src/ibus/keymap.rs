@@ -81,14 +81,40 @@ pub fn translate(keyval: Keysym) -> Option<Key> {
     Some(key)
 }
 
-/// 数字行物理键（X 键码 = evdev + 8，10–18）对应的数字 1–9。
+/// 「修饰键 + 数字」的快捷键要按**物理键**认：Shift 会把数字行的 keyval 变成 `!@#$…`
+/// （mac 壳按 keyCode 认是同一件事）。
 ///
-/// 「修饰键 + 数字」的快捷键要按**键码**认：Shift 会把数字行的 keyval 变成 `!@#$…`
-/// （mac 壳按 keyCode 认是同一件事）。只算数字行：XKB 缺省下 Shift 把小键盘数字变成
-/// 方向 / 编辑键，到不了这条快捷键；Ctrl+小键盘数字又太罕见，键码表宁少勿错。
-pub fn digit_key(keycode: KeyCode) -> Option<usize> {
+/// 键码在 Linux 上有两种惯例并存，都不能只认一种：
+/// - GTK 直连 ibus 的客户端送 X 码（数字行 10–18）——GDK Wayland 对 evdev 键码 + 8
+///   （`gdkseat-wayland.c` 的 `deliver_key_event(data, time, key + 8, …)`）；
+/// - gnome-shell 的 text-input 路径（Electron / Chromium / Firefox 等 zwp_text_input 客户端）
+///   送 evdev 裸码（数字行 2–10）——`inputMethod.js` 的 `process_key_event_async(…,
+///   event.get_key_code() - 8, …)`（注释原话「Convert XKB keycodes to evcodes」）。
+///
+/// 所以 keyval 优先：keyval 本身是数字（Ctrl+数字不改 keyval；AZERTY 这类要 Shift 才出数字的
+/// 布局）或 US 系布局 Shift 出的符号，直接得到数字、与键码无关；键码只做非 US 符号布局的兜底
+/// （2–9 只有 evdev 会用——X 键码 8 以下空缺；11–18 按 X 数字行认，但要先排除 evdev 语义下
+/// 落在这段的字符 0 - = q w e，否则 evdev 路径的 Shift+0 / Shift+减号 / Shift+Q 会误删候选；
+/// 键码 10 两边都是数字行——X 的 1、evdev 的 9——没法分辨，只认 keyval）。
+pub fn digit_for_event(c: char, keycode: KeyCode) -> Option<usize> {
+    if let Some(digit) = c.to_digit(10) {
+        return (1..=9).contains(&digit).then_some(digit as usize);
+    }
+    const SHIFTED_SYMBOLS: [char; 9] = ['!', '@', '#', '$', '%', '^', '&', '*', '('];
+    if let Some(index) = SHIFTED_SYMBOLS.iter().position(|&symbol| symbol == c) {
+        return Some(index + 1);
+    }
     let code = u32::from(keycode);
-    (10..=18).contains(&code).then(|| (code - 9) as usize)
+    if (2..=9).contains(&code) {
+        return Some((code - 1) as usize);
+    }
+    // evdev 键码 11–18 是 KEY_0 KEY_MINUS KEY_EQUAL Backspace Tab Q W E
+    // （Backspace / Tab 走命令键，到不了这里）：这些字符说明这不是数字行
+    const EVDEV_11_18: [char; 12] = ['0', ')', '-', '_', '=', '+', 'q', 'Q', 'w', 'W', 'e', 'E'];
+    if (11..=18).contains(&code) && !EVDEV_11_18.contains(&c) {
+        return Some((code - 9) as usize);
+    }
+    None
 }
 
 #[cfg(test)]
@@ -144,13 +170,43 @@ mod tests {
     }
 
     #[test]
-    fn digit_row_keycodes_map_to_digits() {
-        // X 键码 10–18 是数字行 1–9（修饰键 + 数字按物理键认，keyval 会被 Shift 变掉）
-        assert_eq!(digit_key(KeyCode::new(10)), Some(1));
-        assert_eq!(digit_key(KeyCode::new(14)), Some(5));
-        assert_eq!(digit_key(KeyCode::new(18)), Some(9));
-        assert_eq!(digit_key(KeyCode::new(19)), None, "0 不算");
-        assert_eq!(digit_key(KeyCode::new(9)), None);
-        assert_eq!(digit_key(KeyCode::new(0)), None, "客户端没给键码");
+    fn digit_events_are_recognized_across_keyval_and_both_keycode_conventions() {
+        // keyval 本身是数字：Ctrl+数字（修饰键不改 keyval）、AZERTY（Shift 才出数字）
+        assert_eq!(digit_for_event('4', KeyCode::new(0)), Some(4));
+        assert_eq!(digit_for_event('0', KeyCode::new(0)), None, "0 不是选格");
+        // US 系布局 Shift 出的符号，与键码无关
+        assert_eq!(digit_for_event('!', KeyCode::new(0)), Some(1));
+        assert_eq!(digit_for_event('@', KeyCode::new(0)), Some(2));
+        assert_eq!(digit_for_event('(', KeyCode::new(0)), Some(9));
+        // evdev 裸码（gnome-shell text-input 路径）：数字行 2–10
+        assert_eq!(digit_for_event('!', KeyCode::new(2)), Some(1));
+        assert_eq!(digit_for_event('&', KeyCode::new(8)), Some(7));
+        // 键码兜底服务非 US 符号布局：UK 的 Shift+2 是 '"'，靠键码认出数字 2
+        assert_eq!(digit_for_event('"', KeyCode::new(3)), Some(2));
+        // X 码（GTK 直连）：数字行 10–18
+        assert_eq!(digit_for_event('@', KeyCode::new(11)), Some(2));
+        assert_eq!(digit_for_event('*', KeyCode::new(17)), Some(8));
+        // 键码 10 两边都是数字行（X 的 1、evdev 的 9），只认 keyval
+        assert_eq!(digit_for_event('!', KeyCode::new(10)), Some(1));
+        assert_eq!(digit_for_event('(', KeyCode::new(10)), Some(9));
+        assert_eq!(digit_for_event('"', KeyCode::new(10)), None);
+    }
+
+    #[test]
+    fn non_digit_keys_never_become_digits() {
+        // Shift+0（US ')'）两条路都不认：符号表没有；evdev 11 语义是 KEY_0
+        assert_eq!(digit_for_event(')', KeyCode::new(19)), None); // X 的 0 键
+        assert_eq!(digit_for_event(')', KeyCode::new(11)), None); // evdev KEY_0
+        // Shift+减号（US '_'）、Shift+等号（'+'）、Shift+Q/W/E：evdev 语义落在 11–18 区间，要排除
+        assert_eq!(digit_for_event('_', KeyCode::new(13)), None);
+        assert_eq!(digit_for_event('+', KeyCode::new(13)), None);
+        assert_eq!(digit_for_event('q', KeyCode::new(16)), None);
+        assert_eq!(digit_for_event('Q', KeyCode::new(16)), None);
+        assert_eq!(digit_for_event('e', KeyCode::new(18)), None);
+        // 同一些键在 X 码下不在数字行区间，天然不认
+        assert_eq!(digit_for_event('_', KeyCode::new(20)), None);
+        assert_eq!(digit_for_event('Q', KeyCode::new(24)), None);
+        // 客户端没给键码、keyval 也不是数字 / US 符号
+        assert_eq!(digit_for_event('"', KeyCode::new(0)), None);
     }
 }

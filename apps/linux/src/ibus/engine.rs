@@ -161,13 +161,15 @@ fn dispatch_inner(host: &mut Host, pressed: PressedKey) -> Outcome {
             outcome
         }
         // 修饰键 + 数字（缺省 ⇧，配置 `[shortcut] delete_candidate`）：删掉当前页第 N 个候选，
-        // 只在组句中认。数字按物理键码认——Shift 会把数字行的 keyval 变成 `!@#$…`；
-        // 表达式模式里 ⇧+数字是运算符（`v2^3`），不截。不在组句、没配到的组合照旧走各自分支：
-        // 组句外的 ⇧4 还是 `$` 走标点转换出 ￥，Ctrl / Alt / Super 组合按应用快捷键放行
-        Some(Key::Char(_))
+        // 只在组句中认。数字按 keyval + 物理键码认（`keymap::digit_for_event`）——Shift 会把
+        // 数字行的 keyval 变成 `!@#$…`，而键码在 GTK 直连（X 码）与 gnome-shell 的 text-input
+        // 路径（evdev 裸码）两种惯例下不一样；表达式模式里 ⇧+数字是运算符（`v2^3`），不截。
+        // 不在组句、没配到的组合照旧走各自分支：组句外的 ⇧4 还是 `$` 走标点转换出 ￥，
+        // Ctrl / Alt / Super 组合按应用快捷键放行
+        Some(Key::Char(c))
             if !host.engine.composition().is_empty()
                 && !host.engine.expression_mode()
-                && let Some(digit) = keymap::digit_key(keycode)
+                && let Some(digit) = keymap::digit_for_event(c, keycode)
                 && chord_of(state) == Some(host.delete_keys) =>
         {
             host.break_switch_tap();
@@ -241,6 +243,14 @@ impl IBusEngine for QingjianEngine {
         keycode: KeyCode,
         state: IBusModifierState,
     ) -> fdo::Result<bool> {
+        // 详细日志逐键记 keyval / 键码 / 修饰位：键码惯例排查（GTK 直连 X 码 vs gnome-shell
+        // text-input 路径 evdev 裸码）全靠它；缺省 info 级不记
+        tracing::debug!(
+            keyval = u32::from(keyval),
+            keycode = keycode.raw(),
+            state = state.raw_value(),
+            "按键"
+        );
         let pressed = PressedKey {
             key: keymap::translate(keyval),
             keycode,
@@ -413,6 +423,15 @@ mod tests {
             key: Some(Key::Char(SHIFTED[digit - 1])),
             keycode: KeyCode::new(9 + digit as u32),
             state: IBusModifierState::new_with_raw_value(1),
+        }
+    }
+
+    /// 同上，但键码是 evdev 裸码（gnome-shell 的 text-input 路径送这种，2026-09-20 真机
+    /// 删候选失灵的根因：GTK 直连送 X 码 +8，Electron / Chromium / Firefox 走这条不 +8）。
+    fn shift_digit_evdev(digit: usize) -> PressedKey {
+        PressedKey {
+            keycode: KeyCode::new(1 + digit as u32),
+            ..shift_digit(digit)
         }
     }
 
@@ -691,6 +710,10 @@ mod tests {
             "kai'fan",
             "下一帧辅助行回到纯拼音"
         );
+        // evdev 裸码路径（gnome-shell text-input：Electron / Chromium / Firefox）也要删得掉
+        let (outcome, _) = dispatch(&mut host, shift_digit_evdev(slot + 1));
+        assert!(outcome.handled && outcome.refresh && outcome.commits.is_empty());
+        assert!(host.notice.is_some(), "evdev 键码路径同样触发删候选");
     }
 
     #[test]

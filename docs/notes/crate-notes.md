@@ -225,15 +225,22 @@ ibus 引擎（本 fork 新增，GNOME+Wayland+ibus 的 MVP，设计见 `docs/des
 - 中英切换：Shift 单击（press 到 release 之间无其他键），切模式时组句原样上屏；Caps Lock 亮 = 纯直通。
   Ctrl/Alt/Super 组合是应用快捷键：组句中先原样上屏再放行。
 - 删候选（2026-09-20）：修饰键 + 数字删当前页第 N 个（`[shortcut] delete_candidate`，缺省 Shift；走
-  `config.shortcut.delete_keys()`，与译词键撞了自动退回缺省）。数字按**物理键码**认（`ibus/keymap.rs::digit_key`，
-  X 键码 10–18 = evdev 数字行 1–9）：Shift 会把 keyval 变成 `!@#$…`，按键码认与布局无关；要按住 Shift 才打得出
-  数字的布局（AZERTY）会误触，改配 `control` 一类的修饰键即可；小键盘键码不认（XKB 缺省 Shift 把小键盘数字变
-  方向 / 编辑键，宁少勿错）。只组句中认（英文组句也算——`Engine::forget` 对英文候选走 `forget_english` 删个人
-  英文词表）、表达式模式不截（`v2^3` 的运算符）；修饰位 → `Modifiers` 映射 Alt(mod1)→option、Super(mod4/super)→command，
-  Meta / Hyper / mod5（AltGr）按不配处理。删完重查，提示句（已删除用户词 / 已忘掉学习 / 没什么可删，`host/keys.rs::forget_on_page`
-  → Core `Engine::forget`）并排在**辅助行**拼音右侧（`Frame.aux`；内联 preedit 不掺——那是应用里的 marked text，
-  混进去光标换算全乱），敲下一键收掉（`dispatch_inner` 开头清，修饰键自己的按下 / 抬起不算「敲键」，对齐 mac 只在
-  KeyDown 收）；那格没候选吞键。e2e 场景：`HARNESS_CLIENT=apps/linux/tests/ibus_forget_client.py`。
+  `config.shortcut.delete_keys()`，与译词键撞了自动退回缺省）。数字按 **keyval + 物理键码**认
+  （`ibus/keymap.rs::digit_for_event`）——Shift 会把数字行的 keyval 变成 `!@#$…`，而键码在 Linux 上
+  **两种惯例并存**：GTK 直连 ibus 的客户端送 X 码（数字行 10–18；GDK Wayland 对 evdev + 8），gnome-shell
+  的 text-input 路径（Electron / Chromium / Firefox 等）送 **evdev 裸码**（数字行 2–10；inputMethod.js
+  对 X 码 −8，注释原话「Convert XKB keycodes to evcodes」）——只认一种就是 2026-09-20 真机删候选失灵的
+  根因。判定次序：keyval 本身是数字（Ctrl+数字、AZERTY）或 US 系 Shift 符号（`!@#$…`）直接得数字；
+  否则键码兜底（2–9 按 evdev——X 键码 8 以下空缺；11–18 按 X 数字行认、先排除 evdev 语义落在该段的
+  0 - = q w e，免得 evdev 路径的 Shift+0 / Shift+减号 / Shift+Q 误删；键码 10 两边都是数字行无法分辨、
+  只认 keyval）。逐键的 keyval / 键码 / 修饰位在 debug 级日志里记（`process_key_event` 开头）。
+  只组句中认（英文组句也算——`Engine::forget` 对英文候选走 `forget_english` 删个人英文词表）、
+  表达式模式不截（`v2^3` 的运算符）；修饰位 → `Modifiers` 映射 Alt(mod1)→option、Super(mod4/super)→command，
+  Meta / Hyper / mod5（AltGr）按不配处理。删完重查，提示句（已删除用户词 / 已忘掉学习 / 没什么可删，
+  `host/keys.rs::forget_on_page` → Core `Engine::forget`）并排在**辅助行**拼音右侧（`Frame.aux`；内联
+  preedit 不掺——那是应用里的 marked text，混进去光标换算全乱），敲下一键收掉（`dispatch_inner` 开头清，
+  修饰键自己的按下 / 抬起不算「敲键」，对齐 mac 只在 KeyDown 收）；那格没候选吞键（刚清掉提示时补一帧
+  只重画）。e2e 场景：`HARNESS_CLIENT=apps/linux/tests/ibus_forget_client.py`（两种键码惯例各删一次）。
 - 失焦 / 停用：拼音原样上屏（对齐 Windows 的失焦上屏）+ `break_chain`；停用（被切走，对齐 mac 的 deactivate）时顺带
   `flush_learning`；`Reset` = 清空。
 - 修饰键组合：Ctrl / Alt / Super 组合是应用快捷键——组句中先原样上屏再放行（`handled = false`），缓冲不丢；

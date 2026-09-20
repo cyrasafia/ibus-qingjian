@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""模拟 GTK 的 ibus 客户端（删候选场景）：打 nihao，Shift+1 删第一格候选，
-校验提示真的流过真实 daemon——辅助行拼音右侧多出一句、内联 preedit 不掺、不上屏。
+"""模拟 GTK 的 ibus 客户端（删候选场景）：打 nihao，分别用 evdev 裸码与 X 码两种惯例
+Shift+数字删候选（gnome-shell 的 text-input 路径送 evdev 裸码、GTK 直连送 X 码，
+2026-09-20 真机失灵的根因就是只认了 X 码），校验两条路都出提示、不上屏、preedit 不掺。
 
 用法：HARNESS_CLIENT=apps/linux/tests/ibus_forget_client.py python3 apps/linux/tests/ibus_harness.py
 逐键同样必须 process_key_event_async + 主循环空转（教训见 ibus_client.py 头注）。
@@ -14,9 +15,13 @@ from gi.repository import IBus, GLib
 
 events = []
 SHIFT = 1 << 0
-# (keyval, keycode, state)：修饰键 + 数字按物理键码认（X 键码 10 是数字行 1），
-# keyval 给 Shift 变出来的符号（US 布局）
-keys = [(ord(c), 0, 0) for c in "nihao"] + [(ord("!"), 10, SHIFT)]
+# (keyval, keycode, state)：修饰键 + 数字按 keyval + 物理键码认，keyval 是 Shift 变出来的符号
+keys = (
+    [(ord(c), 0, 0) for c in "nihao"]
+    + [(ord("!"), 2, SHIFT)]    # Shift+1，evdev 键码（gnome-shell text-input 路径）
+    + [(ord("h"), 0, 0)]        # 敲下一键收掉提示
+    + [(ord("@"), 11, SHIFT)]   # Shift+2，X 键码（GTK 直连路径）
+)
 
 bus = IBus.Bus()
 if not bus.is_connected():
@@ -67,16 +72,17 @@ ok = True
 if commit:
     print("删候选不该上屏任何东西：", commit)
     ok = False
-if not preedit or preedit[-1][1] != "ni'hao":
-    print("删候选后 preedit 应仍是纯拼音 ni'hao：", preedit[-1:] or "无")
+if not preedit or "ni'hao" not in preedit[-1][1]:
+    print("删候选后 preedit 应仍是纯拼音：", preedit[-1:] or "无")
     ok = False
 notices = [e[1] for e in aux if "「" in e[1] and "」" in e[1]]
-if not notices:
-    print("辅助行应出现删候选提示（「…」）：", aux[-3:] or "无")
+if len(notices) < 2:
+    print("两种键码惯例各应出一次删候选提示：", aux or "无")
     ok = False
-elif not notices[-1].startswith("ni'hao  "):
-    print("提示应并排在拼音右侧：", notices[-1])
-    ok = False
-print("preedit:", preedit[-1][1] if preedit else "无", " 辅助行:",
-      notices[-1] if notices else "无", " 上屏:", commit)
+else:
+    for notice in notices[:2]:
+        if not notice.startswith("ni'hao"):
+            print("提示应并排在拼音右侧：", notice)
+            ok = False
+print("preedit:", preedit[-1][1] if preedit else "无", " 提示:", notices[:2], " 上屏:", commit)
 sys.exit(0 if ok else 2)

@@ -190,5 +190,9 @@ MVP 已落地（`apps/linux`，实现要点见 `docs/notes/crate-notes.md`「app
 - [ ] SetSurroundingText（前文，联想 / 重排要用时再接）、SetCapabilities 探测、Property 菜单
 - [x] 附加词库接线（2026-09-19）：随包领域词库 + 用户 `dicts/` 目录（`host/dictionaries.rs`），
       `[dictionaries]` 开关热加载、目录文件增删 / 更新 1 秒轮询发现；打包带 `assets/lexicon/dicts/*.tsv`
+- [x] 删候选（2026-09-20）：Shift+数字（`[shortcut] delete_candidate`，缺省 ⇧）删当前页第 N 个候选——
+      数字按物理键码认（Shift 会把 keyval 变成 `!@#$…`）；删完重查，提示并排在辅助行拼音右侧、
+      敲下一键就没（内联 preedit 不掺，那是应用里的 marked text）；那格没候选吞键；
+      e2e 场景 `HARNESS_CLIENT=apps/linux/tests/ibus_forget_client.py`
 - [ ] `[general] input_log` 输入日志未接（配置里写了不生效，见 crate-notes）；
       `docs/user/` 用户文档未动（fork 尚未建 Linux 用户文档，真机验收后再写）

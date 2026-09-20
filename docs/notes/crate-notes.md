@@ -224,6 +224,16 @@ ibus 引擎（本 fork 新增，GNOME+Wayland+ibus 的 MVP，设计见 `docs/des
   会饿死 GDBus 信号分发，看起来像引擎丢信号（2026-09-19 排查半天的教训）。
 - 中英切换：Shift 单击（press 到 release 之间无其他键），切模式时组句原样上屏；Caps Lock 亮 = 纯直通。
   Ctrl/Alt/Super 组合是应用快捷键：组句中先原样上屏再放行。
+- 删候选（2026-09-20）：修饰键 + 数字删当前页第 N 个（`[shortcut] delete_candidate`，缺省 Shift；走
+  `config.shortcut.delete_keys()`，与译词键撞了自动退回缺省）。数字按**物理键码**认（`ibus/keymap.rs::digit_key`，
+  X 键码 10–18 = evdev 数字行 1–9）：Shift 会把 keyval 变成 `!@#$…`，按键码认与布局无关；要按住 Shift 才打得出
+  数字的布局（AZERTY）会误触，改配 `control` 一类的修饰键即可；小键盘键码不认（XKB 缺省 Shift 把小键盘数字变
+  方向 / 编辑键，宁少勿错）。只组句中认（英文组句也算——`Engine::forget` 对英文候选走 `forget_english` 删个人
+  英文词表）、表达式模式不截（`v2^3` 的运算符）；修饰位 → `Modifiers` 映射 Alt(mod1)→option、Super(mod4/super)→command，
+  Meta / Hyper / mod5（AltGr）按不配处理。删完重查，提示句（已删除用户词 / 已忘掉学习 / 没什么可删，`host/keys.rs::forget_on_page`
+  → Core `Engine::forget`）并排在**辅助行**拼音右侧（`Frame.aux`；内联 preedit 不掺——那是应用里的 marked text，
+  混进去光标换算全乱），敲下一键收掉（`dispatch_inner` 开头清，修饰键自己的按下 / 抬起不算「敲键」，对齐 mac 只在
+  KeyDown 收）；那格没候选吞键。e2e 场景：`HARNESS_CLIENT=apps/linux/tests/ibus_forget_client.py`。
 - 失焦 / 停用：拼音原样上屏（对齐 Windows 的失焦上屏）+ `break_chain`；停用（被切走，对齐 mac 的 deactivate）时顺带
   `flush_learning`；`Reset` = 清空。
 - 修饰键组合：Ctrl / Alt / Super 组合是应用快捷键——组句中先原样上屏再放行（`handled = false`），缓冲不丢；
@@ -245,7 +255,6 @@ ibus 引擎（本 fork 新增，GNOME+Wayland+ibus 的 MVP，设计见 `docs/des
   （受 60 秒配置轮询节拍，最迟约一分钟生效），用户目录文件增删 / 同名更新由主循环 1 秒节拍的
   `poll_dictionaries` 快照比对发现（与 Windows Server 同一语义；装配在锁内解析正文，大词库导入后那一拍按键会等它）。
 - 没做：SetSurroundingText（前文）、SetCapabilities（客户端能力探测）、Property 菜单、按应用配置（ibus 不给应用身份）、
-  Shift+数字删候选（mac 壳有 `[shortcut] delete_candidate`，Linux 壳组句中的 Shift+数字仍按直输段处理）、
   个人词库导入导出（学习数据本身是 TSV，API 化待做）。用户词库的脚本级导入 / 更新 / 删除与迁移坑见
   [dictionary-import.md](dictionary-import.md)。
 - 配置覆盖面：`traditional` / `english_candidates` / `log_level`（启动时读）与 `[dictionaries]`（附加词库 / 领域词库开关）都已接；

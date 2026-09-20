@@ -13,7 +13,9 @@ pub mod session;
 pub mod settings;
 
 use qingjian_core::Engine;
-use qingjian_platform::{DEFAULT_PAGE_KEYS, DictionariesConfig, LayoutMode, Scheme, SwitchKey};
+use qingjian_platform::{
+    DEFAULT_PAGE_KEYS, DictionariesConfig, LayoutMode, Modifiers, Scheme, SwitchKey,
+};
 
 use self::session::Session;
 use self::settings::Settings;
@@ -60,6 +62,12 @@ pub struct Host {
     /// 英文模式给不给候选（配置 `[general] english_candidates`）：关掉就是纯直通。
     pub english_candidates: bool,
 
+    /// 删候选的修饰键（配置 `[shortcut] delete_candidate`，缺省 Shift；与译词键撞了退回缺省）。
+    pub delete_keys: Modifiers,
+
+    /// 删候选后给用户看的提示（「已删除用户词「X」」）：随辅助行发在拼音右侧，敲下一键就没。
+    pub notice: Option<String>,
+
     /// 附加词库是按哪份 `[dictionaries]` 装的；开关变了才重新加载。
     pub(super) applied_dictionaries: DictionariesConfig,
 
@@ -97,6 +105,8 @@ impl Host {
             switch_key: SwitchKey::default(),
             english_mode_enabled: true,
             english_candidates: true,
+            delete_keys: Modifiers::SHIFT,
+            notice: None,
             applied_dictionaries,
             dictionary_files: Vec::new(),
             switch_tap_pending: false,
@@ -143,6 +153,7 @@ impl Host {
         self.page_keys = config.general.page_keys();
         self.english_mode_enabled = config.general.english_mode;
         self.english_candidates = config.general.english_candidates;
+        self.delete_keys = config.shortcut.delete_keys();
         self.switch_key = match config.shortcut.switch_mode {
             // GNOME 把「输入法/非输入法切换」也绑在 Ctrl+Space 上，系统那条路会抢先，按不切换处理
             SwitchKey::CtrlSpace => {

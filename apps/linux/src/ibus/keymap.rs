@@ -2,7 +2,7 @@
 //!
 //! 纯函数，可独立测试。
 
-use xkeysym::Keysym;
+use xkeysym::{KeyCode, Keysym};
 
 use crate::host::keys::CommandKey;
 
@@ -81,6 +81,16 @@ pub fn translate(keyval: Keysym) -> Option<Key> {
     Some(key)
 }
 
+/// 数字行物理键（X 键码 = evdev + 8，10–18）对应的数字 1–9。
+///
+/// 「修饰键 + 数字」的快捷键要按**键码**认：Shift 会把数字行的 keyval 变成 `!@#$…`
+/// （mac 壳按 keyCode 认是同一件事）。只算数字行：XKB 缺省下 Shift 把小键盘数字变成
+/// 方向 / 编辑键，到不了这条快捷键；Ctrl+小键盘数字又太罕见，键码表宁少勿错。
+pub fn digit_key(keycode: KeyCode) -> Option<usize> {
+    let code = u32::from(keycode);
+    (10..=18).contains(&code).then(|| (code - 9) as usize)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,5 +141,16 @@ mod tests {
             Some(Key::Command(CommandKey::Tab))
         );
         assert_eq!(translate(Keysym::KP_Space), Some(Key::Char(' ')));
+    }
+
+    #[test]
+    fn digit_row_keycodes_map_to_digits() {
+        // X 键码 10–18 是数字行 1–9（修饰键 + 数字按物理键认，keyval 会被 Shift 变掉）
+        assert_eq!(digit_key(KeyCode::new(10)), Some(1));
+        assert_eq!(digit_key(KeyCode::new(14)), Some(5));
+        assert_eq!(digit_key(KeyCode::new(18)), Some(9));
+        assert_eq!(digit_key(KeyCode::new(19)), None, "0 不算");
+        assert_eq!(digit_key(KeyCode::new(9)), None);
+        assert_eq!(digit_key(KeyCode::new(0)), None, "客户端没给键码");
     }
 }

@@ -25,6 +25,9 @@ pub struct Frame {
     /// preedit 是否可见。
     pub preedit_visible: bool,
 
+    /// 辅助行文本：拼音；删候选后右侧带一句提示（拼音行右侧，敲下一键就没）。
+    pub aux: String,
+
     /// 候选表。
     pub table: LookupTable,
 
@@ -57,6 +60,14 @@ pub fn frame_after_change(host: &mut Host) -> Frame {
 pub fn frame_of(host: &Host) -> Frame {
     let composing = !host.engine.composition().is_empty();
     let (preedit, cursor) = host.session.preedit();
+    // 辅助行 = 拼音 + 删候选提示：ibustext 不带样式，「灰字在拼音行右侧」只能并成一行；
+    // 内联 preedit 不掺提示——那是应用里的 marked text，混进去光标换算全乱
+    let aux = host
+        .notice
+        .as_ref()
+        .filter(|_| composing)
+        .map(|notice| format!("{preedit}  {notice}"))
+        .unwrap_or_else(|| preedit.to_owned());
     let table = lookup_table(host);
     Frame {
         preedit_visible: composing && !preedit.is_empty(),
@@ -64,6 +75,7 @@ pub fn frame_of(host: &Host) -> Frame {
         // marked_cursor 是字符位、ibus 的 cursor_pos 按约定是字节位：本壳的 preedit 全是 ASCII
         // （拼音、' 分隔、直输段），两者一致；哪天 preedit 出非 ASCII（如注音）要在这里换算
         cursor: cursor as u32,
+        aux,
         table_visible: composing && !table.candidates().is_empty(),
         table,
     }
@@ -86,12 +98,12 @@ pub async fn send_frame(se: &SignalEmitter<'_>, frame: &Frame) -> bool {
     }
     let aux = <QingjianEngine as IBusEngineBackend>::update_auxiliary_text(
         se,
-        frame.preedit.clone(),
+        frame.aux.clone(),
         frame.preedit_visible,
     )
     .await;
     if let Err(error) = &aux {
-        tracing::warn!(%error, text = %frame.preedit, "UpdateAuxiliaryText 发不出去");
+        tracing::warn!(%error, text = %frame.aux, "UpdateAuxiliaryText 发不出去");
     }
     let table = <QingjianEngine as IBusEngineBackend>::update_lookup_table(
         se,
@@ -205,7 +217,31 @@ mod tests {
         let frame = frame_of(&host);
         assert!(frame.preedit_visible);
         assert_eq!(frame.preedit, "ni");
+        assert_eq!(frame.aux, "ni", "没提示时辅助行就是拼音");
         assert_eq!(frame.table.candidates().len(), 3);
         assert!(frame.table_visible);
+    }
+
+    #[test]
+    fn delete_notice_rides_the_auxiliary_line_beside_the_pinyin() {
+        let mut host = host_with_layout(LayoutMode::Vertical);
+        for c in "ni".chars() {
+            host.engine.push(c);
+        }
+        host.session.reset("ni".to_owned(), 2, candidates());
+        host.notice = Some("「你」是词库里的词，也没有学习记录，没什么可删".to_owned());
+        let frame = frame_of(&host);
+        assert_eq!(frame.preedit, "ni", "内联 preedit 不掺提示");
+        assert!(
+            frame.aux.starts_with("ni  「你」"),
+            "提示并排在拼音右侧：{}",
+            frame.aux
+        );
+        // 收窗（失焦 / Reset 会同时清 engine 与 session）：提示不再挂在辅助行上
+        host.engine.clear();
+        host.session.clear();
+        host.notice = None;
+        let frame = frame_of(&host);
+        assert_eq!(frame.aux, "");
     }
 }

@@ -389,6 +389,27 @@ pub fn commit_index(engine: &mut Engine, index: usize, session: &Session) -> Out
     }
 }
 
+/// 删掉当前页第 `digit` 个候选（1 起）：用户词整个删掉、词库词清掉对它的全部学习
+/// （`Engine::forget`）。返回给用户看的提示句；那格没有候选返回 `None`，按键吞掉不动。
+pub fn forget_on_page(
+    engine: &mut Engine,
+    session: &Session,
+    page_size: usize,
+    digit: usize,
+) -> Option<String> {
+    let index = session.index_on_page(digit - 1, page_size)?;
+    let candidate = session.candidate(index)?;
+    let forgotten = engine.forget(candidate);
+    let text = &candidate.text;
+    Some(if forgotten.user_word {
+        format!("已删除用户词「{text}」")
+    } else if forgotten.learning {
+        format!("已忘掉对「{text}」的学习记录")
+    } else {
+        format!("「{text}」是词库里的词，也没有学习记录，没什么可删")
+    })
+}
+
 /// 把拼音原样上屏并清空。缓冲区为空时只是放行。
 pub fn commit_raw(engine: &mut Engine) -> Outcome {
     let raw = engine.take_raw();

@@ -243,24 +243,31 @@ mod tests {
     fn raw_preedit_shows_typed_keys_under_shuangpin() {
         // 双拼开着时缺省显示解出的全拼（nihc → ni'hao）；raw_preedit 开着则显示敲的键。
         // 两条路都要发一帧（候选照常、辅助行同内容）。
+        // 方案与开关都从配置进（走 apply_config 接线），不直接改 Host 字段。
         let dict = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/sample/dict.tsv");
-        let mut host = Host::with_engine_and_config(
-            qingjian_core::Engine::new(
-                qingjian_dictionary::Dictionary::from_path(dict).expect("样例词库读不了"),
-            ),
-            Config::default(),
-        );
-        host.engine
-            .set_shuangpin(Some(qingjian_core::ShuangpinScheme::Xiaohe));
-        for c in "nihc".chars() {
-            host.engine.push(c);
-        }
+        let host_with = |raw_preedit: bool| {
+            let mut config = Config::default();
+            config.general.scheme = "xiaohe".to_owned();
+            config.general.raw_preedit = raw_preedit;
+            let mut host = Host::with_engine_and_config(
+                qingjian_core::Engine::new(
+                    qingjian_dictionary::Dictionary::from_path(dict).expect("样例词库读不了"),
+                ),
+                config,
+            );
+            for c in "nihc".chars() {
+                host.engine.push(c);
+            }
+            host
+        };
+
+        let mut host = host_with(false);
         let frame = frame_after_change(&mut host);
         assert_eq!(frame.preedit, "ni'hao", "缺省显示解出的全拼");
         assert!(frame.table_visible, "候选照常");
         assert_eq!(frame.aux, "ni'hao");
 
-        host.raw_preedit = true;
+        let mut host = host_with(true);
         let frame = frame_after_change(&mut host);
         assert_eq!(frame.preedit, "nihc", "raw_preedit 显示敲的原始键");
         assert_eq!(frame.aux, "nihc", "辅助行跟着显示原始键");

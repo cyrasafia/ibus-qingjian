@@ -100,5 +100,7 @@ windows-registry = "0.6.1"
 cosmic-text = { git = "https://github.com/qingjian-team/cosmic-text", rev = "9cf0d65a5e4db381e34907103326673386096be3" }
 
 # librush 0.2.3 暴露了 LookupTable::orientation 字段却不导出 IBusOrientation 类型，壳没法设置候选窗方向；
-# vendor 副本改了两处：导出 IBusOrientation、给它加 PartialEq/Eq（测试断言要比较）。上游收了就删掉这段回 crates.io。
+# 又把 SetCapabilities 当「忽略」吃掉，壳拿不到客户端能力、没法判断面板会不会兜底画 preedit。
+# vendor 副本改了三处：导出 IBusOrientation、给它加 PartialEq/Eq（测试断言要比较）、
+# 把 SetCapabilities 转发给 IBusEngine trait。上游收了就删掉这段回 crates.io。
 librush = { path = "vendor/librush" }

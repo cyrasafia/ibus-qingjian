@@ -52,6 +52,29 @@ pub trait IBusEngine: Send + Sync {
         async { Ok(()) }
     }
 
+    /// 客户端能力 (`SetCapabilities`)
+    ///
+    /// `caps` 是 ibus `IBusCapabilityType` 的位掩码 (`IBUS_CAP_PREEDIT_TEXT` = 1 << 0,
+    /// `IBUS_CAP_AUXILIARY_TEXT` = 1 << 1, `IBUS_CAP_LOOKUP_TABLE` = 1 << 2,
+    /// `IBUS_CAP_FOCUS` = 1 << 3, ...)。
+    ///
+    /// daemon 按它决定同一条 UI 信息发给谁: 客户端不认的那部分转给面板画
+    /// (见 ibus `bus/inputcontext.c` 的 `PREEDIT_CONDITION` 与
+    /// `bus_input_context_update_auxiliary_text`)。引擎要知道这件事, 否则会把
+    /// 面板已经兜底画出来的内容再发一遍辅助行, 候选窗上出现两行同样的拼音。
+    ///
+    /// 每次 focus in 都会重来一遍 (换客户端就换一组能力), 组句中的引擎收到新能力后
+    /// 一般要重发一帧: Wayland 下 daemon 会吞掉一部分 FocusOut
+    /// (`IGNORE_FOCUS_OUT_CONDITION`), 不能指望失焦那边已经把 UI 收干净。
+    fn set_capabilities(
+        &mut self,
+        _se: SignalEmitter<'_>,
+        _server: &ObjectServer,
+        _caps: u32,
+    ) -> impl Future<Output = fdo::Result<()>> + Send {
+        async { Ok(()) }
+    }
+
     /// 获得焦点
     fn focus_in(
         &mut self,
@@ -406,9 +429,13 @@ impl<T: IBusEngine + 'static> Engine<T> {
         Ok(())
     }
 
-    // 忽略
-    fn set_capabilities(&mut self, _caps: u32) -> fdo::Result<()> {
-        Ok(())
+    async fn set_capabilities(
+        &mut self,
+        #[zbus(signal_emitter)] se: SignalEmitter<'_>,
+        #[zbus(object_server)] server: &ObjectServer,
+        caps: u32,
+    ) -> fdo::Result<()> {
+        self.e.set_capabilities(se, server, caps).await
     }
 
     // 忽略 (用户界面相关)

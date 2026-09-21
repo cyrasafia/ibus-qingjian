@@ -73,7 +73,7 @@ daemon → 引擎，方法调用（引擎要实现）：
 | `CommitText` | 上屏 |
 | `UpdatePreeditText(text, cursor_pos, visible)` | 内联在应用里的 preedit（带下划线），cursor 按字符数计 |
 | `UpdateLookupTable(table, visible)` | 候选表：纯文本候选数组 + labels + 每页大小（1–16）+ 光标 + 是否循环 |
-| `UpdateAuxiliaryText` | 候选窗旁的辅助行——放拼音串 |
+| `UpdateAuxiliaryText` | 候选窗旁的辅助行——放拼音串（只在客户端自己画内联 preedit 时放，否则面板上会有两行拼音）与删候选提示 |
 | `RegisterProperties` / `UpdateProperty` | 菜单与状态图标；MVP 不做 |
 
 两个要意识到的限制：
@@ -93,13 +93,13 @@ daemon → 引擎，方法调用（引擎要实现）：
 zbus 直连再分两步走：
 
 1. **MVP 直接依赖 [librush](https://github.com/fm-elpac/librush)**（crates.io `librush`）：纯 Rust、`deny(unsafe_code)`、zbus 5、把 ibus 源码逐文件对着注释；地址发现、factory、`IBusEngine` trait、LookupTable 序列化都齐。许可证 LGPL-2.1-or-later **或** GPL-3.0-or-later 双选，取 GPL-3.0-or-later 与本仓库一致。
-2. 它只覆盖最小接口（没暴露 `SetSurroundingText` / `SetCapabilities` / Property 系列），MVP 够用；要扩时给它提 PR，或把这几百行协议层内化进自己的壳（协议面就 factory + engine 两份 XML，可控）。
+2. 它只覆盖最小接口（`SetSurroundingText` / Property 系列没暴露，`SetCapabilities` 在 vendor 副本里补了转发——壳要靠客户端能力判断面板会不会兜底画 preedit，见下「实现状态」2026-09-21 那条），MVP 够用；要扩时给它提 PR，或把这几百行协议层内化进自己的壳（协议面就 factory + engine 两份 XML，可控）。
 
 ### 与 Core 的对接
 
 壳只做架构约束允许的两件事：
 
-- **按键**：keysym + state → Core 的按键输入；Core 的帧 → `UpdatePreeditText` + `UpdateAuxiliaryText` + `UpdateLookupTable`；上屏 → `CommitText`。观感落点（真机验证过，2026-09-19）：内联 preedit 显示拼音 marked text（带 `'` 分隔与字符光标，同 mac 壳、光标编辑直接可见），**辅助行同帧再发一遍拼音**——主流 ibus 引擎（libpinyin 等）都发辅助行，不支持内联 preedit 的客户端（XIM、未声明能力的 text-input 路径）只有这条路能看到拼音；代价是内联可见的客户端会看到应用内与候选窗各一份拼音，观感能否接受真机继续用下来再定。候选表只放候选文本，排布方向按 `[general] layout` 显式下发（gnome-shell 把 `System` 当竖排处理、不回退系统设置，缺省发 `System` 等于横排永不生效）。`[general] raw_preedit`（2026-09-21）开着时 preedit 与辅助行改为显示敲的原始键（`nihc` 而非 `ni'hao`，Shift 大写还原），分流在 `present::preedit_of`；只影响显示，查询与学习仍按全拼。
+- **按键**：keysym + state → Core 的按键输入；Core 的帧 → `UpdatePreeditText` + `UpdateAuxiliaryText` + `UpdateLookupTable`；上屏 → `CommitText`。观感落点（真机验证过，2026-09-19）：内联 preedit 显示拼音 marked text（带 `'` 分隔与字符光标，同 mac 壳、光标编辑直接可见）。**辅助行的拼音按客户端能力发**（2026-09-21 改）：客户端认内联 preedit（caps 有 `IBUS_CAP_PREEDIT_TEXT`）时辅助行同帧带一份拼音（候选窗里有落点，代价是应用内与候选窗各一份）；不认的客户端（Sublime / XIM）daemon 会把 preedit 转给面板画，辅助行再发一遍就是候选窗上两行一样的拼音——此时辅助行只带删候选提示。ibus 的分流规则见 `bus/inputcontext.c` 的 `PREEDIT_CONDITION` 与 `bus_input_context_update_auxiliary_text`，能力位从 `SetCapabilities` 进来（`vendor/librush` 补的转发）。候选表只放候选文本，排布方向按 `[general] layout` 显式下发（gnome-shell 把 `System` 当竖排处理、不回退系统设置，缺省发 `System` 等于横排永不生效）。`[general] raw_preedit`（2026-09-21）开着时 preedit 与辅助行改为显示敲的原始键（`nihc` 而非 `ni'hao`，Shift 大写还原），分流在 `present::preedit_of`；只影响显示，查询与学习仍按全拼。
 - **进程模型**：ibus 会为每个 input context 各调一次 `CreateEngine`，多个 engine 对象全部转发到**进程级单例 Core `Engine`**（同 mac 壳 `host.rs` 的模式），`focus_in` 只切活跃对象。
 - 双拼小鹤：`[general] shuangpin = "flypy"`，Core 已有，无壳侧逻辑。
 - 依赖树只带 core / dictionary / lm / learning / format / platform；**translate / predict / neural / render 全部不进**——Core 的 `Translator` / `Predictor` trait 留空实现，候选照常出（mac/win 壳做不到这么干净，Linux 壳反而最贴「平台只是壳」）。
@@ -157,7 +157,8 @@ Core 侧改动照旧先跑 `qingjian-cli`；壳层手测用一个 GTK 应用（g
 - **多 input context 并发**：两个应用交替打字时共享同一个 Core 组合态的行为要定。倾向 `focus_out` 清组合（ibus 引擎惯例），mac 壳是切输入源才收窗——两者取舍实现时验证。
 - **引擎收不到应用身份**：ibus 不把 app id 告诉引擎（X11 下还能自己查焦点窗口，Wayland 下没有途径），`[apps] english_candidates_off` 这类按应用配置在 ibus 壳没有数据来源；MVP 不做按应用行为，需要时再议（如仅 X11 支持或砍掉该功能）。
 - **ibus 版本差异**：1.5.x 之间有 `FocusInId` 这类新增方法；目标只认 1.5.29 一线（Arch 当前版本）。
-- **客户端不支持内联 preedit**（`SetCapabilities` 没给 PREEDIT_TEXT）：daemon 把 preedit 转给面板显示（gnome-shell 的候选窗有 preedit 行），引擎侧的兜底是辅助行拼音（已发）。
+- **客户端不支持内联 preedit**（`SetCapabilities` 没给 PREEDIT_TEXT）：daemon 把 preedit 转给面板显示（gnome-shell 的候选窗有 preedit 行）。辅助行同理按能力分流，所以这类客户端**不能**再发一遍辅助行拼音——面板上会是两行一样的拼音（2026-09-21 Sublime 真机现象）；引擎按 `client_caps` 判断，见「实现状态」。
+- **`embed-preedit-text` 感知不到**：daemon 的真实条件是「客户端认 preedit **且**（`org.freedesktop.ibus.general.engine.embed-preedit-text` 开着 **或** 客户端不认 FOCUS）」。用户把该项关掉后，声明了 preedit 能力的客户端也改由面板画，而引擎仍会在辅助行带拼音——两行拼音在**所有**客户端复现。协议上没有途径让引擎读到这个设置（缺省开着），只能记在这。
 - **候选窗观感完全交给 GNOME**：不能自定义字体间距主题（既定取舍，换主题是系统的事）。
 - **librush 维护度**：个人项目、更新不勤；好在协议层小，出问题就内化，不构成架构风险。
 
@@ -176,18 +177,28 @@ MVP 已落地（`apps/linux`，实现要点见 `docs/notes/crate-notes.md`「app
 - [x] 排布方向按 `[general] layout` 显式下发（2026-09-19）：gnome-shell 把 `System` 当竖排、不回退 gsettings，
       librush 缺省恰是 `System`——不显式下发横排永远立不起来。librush 0.2.3 没导出 `IBusOrientation` 类型，
       走 `vendor/librush` 补一行 re-export（根 Cargo.toml 的 `[patch.crates-io]`，上游收了就撤）
-- [x] 辅助行拼音兜底（2026-09-19）：同帧把拼音发 `UpdateAuxiliaryText`，无内联 preedit 能力的客户端
-      （XIM / 部分 text-input 路径）在候选窗里也有拼音可看——同日定位真机上「preedit 无法显示」
+- [x] 辅助行按客户端能力发（2026-09-19 起发拼音，2026-09-21 改为看能力）：`UpdateAuxiliaryText` 只在客户端
+      自己画内联 preedit（caps 有 `IBUS_CAP_PREEDIT_TEXT`）时带拼音；不认 preedit 的客户端由 daemon 把 preedit
+      转给面板画，辅助行再发一遍就是候选窗上两行一样的拼音（Sublime 真机现象）。删候选的提示不受这条限制。
+      组句中能力变了（= 换客户端）立刻补发一帧：Wayland 下 daemon 会按 `IGNORE_FOCUS_OUT_CONDITION` 吞掉
+      一部分 FocusOut，不能指望失焦那边已经收窗，不补则旧口径要挂到下一次按键。
+      librush 0.2.3 把 `SetCapabilities` 当「忽略」吃掉，`vendor/librush` 补转发（补丁第三处）
 - [x] headless 集成测试台 `apps/linux/tests/`（2026-09-19）：独立 socket + 独立 HOME 起真 ibus-daemon 与引擎，
-      python GI 模拟 GTK 客户端逐键打字断言 preedit / 辅助行 / 候选方向 / 上屏。**教训：测试客户端逐键必须
-      异步 + 主循环空转，同步调用夹 `sleep` 会把 GDBus 信号分发饿死，看起来像引擎丢信号**
+      python GI 模拟客户端逐键打字断言 preedit / 辅助行 / 候选方向 / 上屏；`HARNESS_CAPS=panel` 换成不声明
+      preedit 能力的客户端（断言辅助行不重复拼音），`HARNESS_CAPS=flip` 组句中换两次能力（断言每次都补发一帧、
+      辅助行按新口径）。**教训：测试客户端逐键必须
+      异步 + 主循环空转，同步调用夹 `sleep` 会把 GDBus 信号分发饿死，看起来像引擎丢信号；换能力要独占一个 tick，
+      与按键同 tick 时 daemon 侧能力先生效、引擎晚一拍收到，两帧顺序取决于投递时序**
 - [x] 数据与路径：XDG 配置 / 学习数据、`$QINGJIAN_DATA_DIR` 随包数据（开发指 `assets/lexicon`）、60 秒落盘 + 配置热加载
 - [x] panic 边界（`catch_unwind` + 锁毒化恢复）、组件 XML + `install-dev.sh`
 - [x] 测试：keymap 翻译、会话分页 / 高亮 / 数字选格、带真实 Engine 的按键流（样例词库）、排布方向映射
 - [x] 真机验证（2026-09-19，GNOME+Wayland）：横排 / 竖排随 `[general] layout` 生效，preedit 与辅助行拼音可见
+- [x] 真机验证（2026-09-21，GNOME+Wayland，Sublime）：辅助行按能力发生效——候选窗只剩一行拼音（面板兜底画的那行），
+      GTK 应用的内联 preedit 与辅助行照旧。验的是「补发帧」之前的版本；补发帧（组句中换客户端）由
+      `HARNESS_CAPS=flip` 覆盖，真机待复验
 - [ ] 真机验收余项：候选窗观感细节、光标定位跟随、journal 日志、各客户端类型（GTK3 / XIM / Electron）覆盖
 - [ ] 个人词库导入导出（学习数据是 TSV，先能手工拷贝；CLI 子命令 API 化待做）
-- [ ] SetSurroundingText（前文，联想 / 重排要用时再接）、SetCapabilities 探测、Property 菜单
+- [ ] SetSurroundingText（前文，联想 / 重排要用时再接）、Property 菜单
 - [x] 附加词库接线（2026-09-19）：随包领域词库 + 用户 `dicts/` 目录（`host/dictionaries.rs`），
       `[dictionaries]` 开关热加载、目录文件增删 / 更新 1 秒轮询发现；打包带 `assets/lexicon/dicts/*.tsv`
 - [x] 删候选（2026-09-20）：Shift+数字（`[shortcut] delete_candidate`，缺省 ⇧）删当前页第 N 个候选——

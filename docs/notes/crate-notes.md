@@ -211,17 +211,26 @@ ibus 引擎（本 fork 新增，GNOME+Wayland+ibus 的 MVP，设计见 `docs/des
   对齐 mac 壳 turn_page 只 render 不 refresh）），
   纯函数不碰平台 API，测试直接拿样例词库建 Engine 跑按键流。keyval 翻译在 `ibus/keymap.rs`（X keysym，小键盘数字归一）。
 - 呈现在 `ibus/present.rs`：锁内构 `Frame`（preedit 文本 + LookupTable），锁外发 D-Bus 信号。preedit 内联显示拼音
-  （`Query::marked_text` + 字符光标，同 mac 的 marked text），**同帧把拼音再发一遍辅助行**（`UpdateAuxiliaryText`，
-  无内联 preedit 能力的客户端靠它在候选窗里看到拼音）；候选表全量候选 + `page_size` + 高亮光标 + 排布方向
+  （`Query::marked_text` + 字符光标，同 mac 的 marked text）；辅助行（`UpdateAuxiliaryText`）**只在客户端自己画内联
+  preedit 时才带拼音**——ibus 按客户端能力分流：不认 preedit 的客户端（Sublime / XIM）由 daemon 把 preedit 转给面板画，
+  辅助行再发一遍拼音，候选窗上就是两行一样的拼音（2026-09-21 真机报的观感 bug，判据 `host.client_caps` 的
+  `IBUS_CAP_PREEDIT_TEXT` 位，能力来自 `SetCapabilities`）。组句中能力变了（= 换客户端）立刻补发一帧：Wayland 下
+  daemon 按 `IGNORE_FOCUS_OUT_CONDITION` 会吞掉一部分 FocusOut（恰好覆盖这类客户端），不能指望失焦那边已收窗，
+  不补则旧口径要挂到下一次按键。删候选的提示不受这条限制：面板兜底画不出它，
+  辅助行是唯一落点。候选表全量候选 + `page_size` + 高亮光标 + 排布方向
   （`[general] layout` → `IBusOrientation`，gnome-shell 把 `System` 当竖排不回退系统设置，必须显式下发），
   分页渲染交给 ibus 原生候选窗。发送失败记日志不重试（下一帧整体覆盖）。
 - **librush 走 `vendor/librush`（0.2.3 + 小补丁）**：上游没导出 `IBusOrientation`，壳没法设候选窗方向；
-  补丁两处——导出该类型、加 `PartialEq/Eq`（测试断言要比较）。根 Cargo.toml `[patch.crates-io]` 指过去，
-  上游收了就撤（同 cosmic-text 补丁的规矩）。
+  又把 `SetCapabilities` 当「忽略」吃掉，壳拿不到客户端能力、判不了面板会不会兜底画 preedit。
+  补丁三处——导出该类型、加 `PartialEq/Eq`（测试断言要比较）、`SetCapabilities` 转发给 `IBusEngine` trait。
+  根 Cargo.toml `[patch.crates-io]` 指过去，上游收了就撤（同 cosmic-text 补丁的规矩）。
 - **headless 集成测试台 `apps/linux/tests/`**：`ibus_harness.py` 起独立 socket + 独立 HOME 的真 ibus-daemon 与引擎
-  （不动真实会话），`ibus_client.py` 用 python GI 模拟 GTK 客户端逐键打字，断言 preedit / 辅助行 / 候选方向 / 上屏。
-  `HARNESS_LAYOUT=horizontal` 可切横排断言。逐键必须 `process_key_event_async` + 主循环空转——同步调用夹 `sleep`
-  会饿死 GDBus 信号分发，看起来像引擎丢信号（2026-09-19 排查半天的教训）。
+  （不动真实会话），`ibus_client.py` 用 python GI 模拟客户端逐键打字，断言 preedit / 辅助行 / 候选方向 / 上屏。
+  `HARNESS_LAYOUT=horizontal` 可切横排断言；`HARNESS_CAPS=panel` 换成不声明 preedit 能力的客户端（Sublime / XIM 那类），
+  断言辅助行不发拼音（拼音由面板兜底画，两行重复就是 2026-09-21 修的那个 bug）；`HARNESS_CAPS=flip` 组句中换两次
+  能力，断言每次都补发一帧且辅助行按新口径。逐键必须 `process_key_event_async`
+  + 主循环空转——同步调用夹 `sleep` 会饿死 GDBus 信号分发，看起来像引擎丢信号（2026-09-19 排查半天的教训）；
+  换能力要独占一个 tick（daemon 侧能力立刻生效、引擎晚一拍收到 SetCapabilities，同 tick 发键则两帧顺序看投递时序）。
 - 中英切换：Shift 单击（press 到 release 之间无其他键），切模式时组句原样上屏；Caps Lock 亮 = 纯直通。
   Ctrl/Alt/Super 组合是应用快捷键：组句中先原样上屏再放行。
 - 删候选（2026-09-20）：修饰键 + 数字删当前页第 N 个（`[shortcut] delete_candidate`，缺省 Shift；走
@@ -238,7 +247,8 @@ ibus 引擎（本 fork 新增，GNOME+Wayland+ibus 的 MVP，设计见 `docs/des
   表达式模式不截（`v2^3` 的运算符）；修饰位 → `Modifiers` 映射 Alt(mod1)→option、Super(mod4/super)→command，
   Meta / Hyper / mod5（AltGr）按不配处理。删完重查，提示句（已删除用户词 / 已忘掉学习 / 没什么可删，
   `host/keys.rs::forget_on_page` → Core `Engine::forget`）并排在**辅助行**拼音右侧（`Frame.aux`；内联
-  preedit 不掺——那是应用里的 marked text，混进去光标换算全乱），敲下一键收掉（`dispatch_inner` 开头清，
+  preedit 不掺——那是应用里的 marked text，混进去光标换算全乱；客户端不认内联 preedit 时辅助行只剩提示，
+  拼音由面板兜底画），敲下一键收掉（`dispatch_inner` 开头清，
   修饰键自己的按下 / 抬起不算「敲键」，对齐 mac 只在 KeyDown 收）；那格没候选吞键（刚清掉提示时补一帧
   只重画）。e2e 场景：`HARNESS_CLIENT=apps/linux/tests/ibus_forget_client.py`（两种键码惯例各删一次）。
 - 失焦 / 停用：拼音原样上屏（对齐 Windows 的失焦上屏）+ `break_chain`；停用（被切走，对齐 mac 的 deactivate）时顺带

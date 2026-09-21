@@ -1,15 +1,16 @@
 //! 呈现：把 Host 的状态翻译成 ibus 的 UI 信号（preedit、候选表、上屏）。
 //!
 //! 分两步：锁内构帧（[`Frame`]，纯数据），锁外发送（await）。preedit 内联在应用里显示拼音
-//! （带 `'` 分隔与光标，与 mac 壳的 marked text 同一内容）；不支持内联 preedit 的客户端
-//! （XIM、未声明能力的 text-input 路径）由面板兜底显示，但那条路并非所有客户端都走得到，
-//! 所以同帧再把拼音发一遍辅助行（`UpdateAuxiliaryText`）——主流 ibus 引擎都这么做，
-//! 候选窗里始终有拼音落点。收窗 = 空候选 + 隐藏 preedit。
+//! （带 `'` 分隔与光标，与 mac 壳的 marked text 同一内容）；客户端不认内联 preedit 时
+//! daemon 会把它转给面板画，拼音照样看得见。辅助行（`UpdateAuxiliaryText`）只在面板不会
+//! 兜底画拼音时才带上拼音——否则候选窗上是两行一样的拼音（`host.client_caps` 判定，
+//! 理由见 [`super::engine::CAP_PREEDIT_TEXT`]）；删候选的提示不受这条限制，它是本壳独有的信息，
+//! 面板兜底画不出来。收窗 = 空候选 + 隐藏 preedit + 隐藏辅助行。
 
 use librush::ibus::{IBusEngineBackend, IBusOrientation, IBusPreeditFocusMode, LookupTable};
 use zbus::object_server::SignalEmitter;
 
-use super::engine::QingjianEngine;
+use super::engine::{CAP_PREEDIT_TEXT, QingjianEngine};
 use crate::host::Host;
 use qingjian_platform::LayoutMode;
 
@@ -25,8 +26,11 @@ pub struct Frame {
     /// preedit 是否可见。
     pub preedit_visible: bool,
 
-    /// 辅助行文本：拼音；删候选后右侧带一句提示（拼音行右侧，敲下一键就没）。
+    /// 辅助行文本：面板不兜底画拼音时是拼音，删候选后右侧带一句提示（敲下一键就没）。
     pub aux: String,
+
+    /// 辅助行是否可见（空文本不发，免得面板留一行空白）。
+    pub aux_visible: bool,
 
     /// 候选表。
     pub table: LookupTable,
@@ -78,13 +82,18 @@ pub fn frame_of(host: &Host) -> Frame {
     let composing = !host.engine.composition().is_empty();
     let (preedit, cursor) = host.session.preedit();
     // 辅助行 = 拼音 + 删候选提示：ibustext 不带样式，「灰字在拼音行右侧」只能并成一行；
-    // 内联 preedit 不掺提示——那是应用里的 marked text，混进去光标换算全乱
-    let aux = host
-        .notice
-        .as_ref()
-        .filter(|_| composing)
-        .map(|notice| format!("{preedit}  {notice}"))
-        .unwrap_or_else(|| preedit.to_owned());
+    // 内联 preedit 不掺提示——那是应用里的 marked text，混进去光标换算全乱。
+    // 拼音只在客户端自己画内联 preedit 时才带上：不认 preedit 的客户端（Sublime、XIM 这类）
+    // daemon 会把 preedit 转给面板画，辅助行再发一遍拼音，候选窗上就是两行一样的拼音。
+    // 提示不受这条限制——面板兜底画不出「已删除用户词 X」，它只有辅助行这一个落点。
+    let notice = host.notice.as_ref().filter(|_| composing);
+    let pinyin_on_aux = host.client_caps & CAP_PREEDIT_TEXT != 0;
+    let aux = match (pinyin_on_aux, notice) {
+        (true, Some(notice)) => format!("{preedit}  {notice}"),
+        (true, None) => preedit.to_owned(),
+        (false, Some(notice)) => notice.clone(),
+        (false, None) => String::new(),
+    };
     let table = lookup_table(host);
     Frame {
         preedit_visible: composing && !preedit.is_empty(),
@@ -92,6 +101,7 @@ pub fn frame_of(host: &Host) -> Frame {
         // marked_cursor 是字符位、ibus 的 cursor_pos 按约定是字节位：本壳的 preedit 全是 ASCII
         // （拼音、' 分隔、直输段），两者一致；哪天 preedit 出非 ASCII（如注音）要在这里换算
         cursor: cursor as u32,
+        aux_visible: composing && !aux.is_empty(),
         aux,
         table_visible: composing && !table.candidates().is_empty(),
         table,
@@ -116,7 +126,7 @@ pub async fn send_frame(se: &SignalEmitter<'_>, frame: &Frame) -> bool {
     let aux = <QingjianEngine as IBusEngineBackend>::update_auxiliary_text(
         se,
         frame.aux.clone(),
-        frame.preedit_visible,
+        frame.aux_visible,
     )
     .await;
     if let Err(error) = &aux {
@@ -183,12 +193,17 @@ mod tests {
         let dict = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/sample/dict.tsv");
         let mut config = Config::default();
         config.general.layout = layout;
-        Host::with_engine_and_config(
+        let mut host = Host::with_engine_and_config(
             qingjian_core::Engine::new(
                 qingjian_dictionary::Dictionary::from_path(dict).expect("样例词库读不了"),
             ),
             config,
-        )
+        );
+        // 缺省按「客户端自己画内联 preedit」算（GTK 那类）：辅助行带拼音。
+        // 不声明 preedit 能力的客户端（Sublime / XIM）由面板兜底画，见
+        // panel_fallback_client_gets_no_duplicate_pinyin。
+        host.client_caps = CAP_PREEDIT_TEXT;
+        host
     }
 
     fn candidates() -> Vec<Candidate> {
@@ -235,6 +250,7 @@ mod tests {
         assert!(frame.preedit_visible);
         assert_eq!(frame.preedit, "ni");
         assert_eq!(frame.aux, "ni", "没提示时辅助行就是拼音");
+        assert!(frame.aux_visible);
         assert_eq!(frame.table.candidates().len(), 3);
         assert!(frame.table_visible);
     }
@@ -255,6 +271,7 @@ mod tests {
                 ),
                 config,
             );
+            host.client_caps = CAP_PREEDIT_TEXT;
             for c in "nihc".chars() {
                 host.engine.push(c);
             }
@@ -287,6 +304,7 @@ mod tests {
             Config::default(),
         );
         host.engine.set_shift_letter_compose(true);
+        host.client_caps = CAP_PREEDIT_TEXT;
         for c in "Ii".chars() {
             host.engine.push(c);
         }
@@ -294,6 +312,30 @@ mod tests {
         assert!(!frame.table_visible, "切不动不出候选");
         assert_eq!(frame.preedit, "Ii", "回退显示敲的键（大写还原）");
         assert_eq!(frame.aux, "Ii");
+    }
+
+    #[test]
+    fn panel_fallback_client_gets_no_duplicate_pinyin() {
+        // 不声明 IBUS_CAP_PREEDIT_TEXT 的客户端（Sublime / XIM 这类）：daemon 把 preedit 转给
+        // 面板画，辅助行再带一遍拼音就是候选窗上两行一样的拼音。拼音只走 preedit；
+        // 提示仍走辅助行——那是本壳独有的信息，面板兜底画不出来。
+        let mut host = host_with_layout(LayoutMode::Vertical);
+        host.client_caps = 0;
+        for c in "ni".chars() {
+            host.engine.push(c);
+        }
+        host.session.reset("ni".to_owned(), 2, candidates());
+        let frame = frame_of(&host);
+        assert_eq!(frame.preedit, "ni", "拼音照常走 preedit，由面板兜底画");
+        assert!(frame.preedit_visible);
+        assert_eq!(frame.aux, "", "辅助行不再重复一遍拼音");
+        assert!(!frame.aux_visible);
+        assert!(frame.table_visible, "候选不受影响");
+
+        host.notice = Some("已删除用户词「你」".to_owned());
+        let frame = frame_of(&host);
+        assert_eq!(frame.aux, "已删除用户词「你」", "提示仍有落点");
+        assert!(frame.aux_visible);
     }
 
     #[test]

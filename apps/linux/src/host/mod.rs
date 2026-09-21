@@ -72,6 +72,12 @@ pub struct Host {
     /// 删候选后给用户看的提示（「已删除用户词「X」」）：随辅助行发在拼音右侧，敲下一键就没。
     pub notice: Option<String>,
 
+    /// 当前客户端的能力位掩码（ibus `SetCapabilities`，位义见
+    /// [`CAP_PREEDIT_TEXT`](crate::ibus::engine::CAP_PREEDIT_TEXT)）。
+    /// 决定拼音要不要再发一遍辅助行：客户端不认内联 preedit 时 daemon 把 preedit 转给面板画，
+    /// 此时再发辅助行，候选窗上就是两行同样的拼音。缺省 0（还没收到能力）按面板兜底算。
+    pub client_caps: u32,
+
     /// 附加词库是按哪份 `[dictionaries]` 装的；开关变了才重新加载。
     pub(super) applied_dictionaries: DictionariesConfig,
 
@@ -112,6 +118,7 @@ impl Host {
             english_candidates: true,
             delete_keys: Modifiers::SHIFT,
             notice: None,
+            client_caps: 0,
             applied_dictionaries,
             dictionary_files: Vec::new(),
             switch_tap_pending: false,

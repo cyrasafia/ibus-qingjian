@@ -17,6 +17,14 @@ use super::present;
 use crate::host::Host;
 use crate::host::keys::{self, CommandKey, Outcome};
 
+/// ibus 的 `IBusCapabilityType::IBUS_CAP_PREEDIT_TEXT`：客户端自己画内联 preedit。
+///
+/// daemon 按能力位分流同一条 UI 信息（`bus/inputcontext.c`）：客户端认 preedit 就发给客户端，
+/// 不认就转给面板画（gnome-shell 的候选窗有 preedit 行）；辅助行同理（`IBUS_CAP_AUXILIARY_TEXT`）。
+/// 所以「面板上会不会已经有一行拼音」由这一位决定——面板会兜底画时再把拼音发一遍辅助行，
+/// 候选窗就是两行同样的拼音（Sublime 这类不声明 preedit 能力的客户端的实际观感）。
+pub const CAP_PREEDIT_TEXT: u32 = 1 << 0;
+
 /// ibus 引擎实现：全部状态在共享的 Host 里，自己只留一个句柄。
 pub struct QingjianEngine {
     /// 进程级状态。
@@ -269,6 +277,32 @@ impl IBusEngine for QingjianEngine {
         Ok(outcome.handled)
     }
 
+    async fn set_capabilities(
+        &mut self,
+        se: SignalEmitter<'_>,
+        _server: &ObjectServer,
+        caps: u32,
+    ) -> fdo::Result<()> {
+        // 能力变了就记下来：构帧时按它决定辅助行带不带拼音（present::frame_of）。
+        // 组句中途还变 = 换了客户端，补一帧把辅助行改成新客户端的口径——Wayland 下 daemon
+        // 会吞掉一部分 FocusOut（ibus `IGNORE_FOCUS_OUT_CONDITION`），不能指望失焦那边已经收窗；
+        // 不补的话拼音要么多一行（面板已兜底还发）、要么少一行，得等下一次按键才纠正。
+        let frame = {
+            let mut host = lock(&self.host);
+            if host.client_caps == caps {
+                None
+            } else {
+                tracing::debug!(caps, preedit = caps & CAP_PREEDIT_TEXT != 0, "客户端能力");
+                host.client_caps = caps;
+                (!host.engine.composition().is_empty()).then(|| present::frame_of(&host))
+            }
+        };
+        if let Some(frame) = frame {
+            present::send_frame(&se, &frame).await;
+        }
+        Ok(())
+    }
+
     async fn focus_out(
         &mut self,
         se: SignalEmitter<'_>,
@@ -402,9 +436,13 @@ mod tests {
 
     fn test_host() -> Host {
         let dict = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/sample/dict.tsv");
-        Host::with_engine(Engine::new(
+        let mut host = Host::with_engine(Engine::new(
             Dictionary::from_path(dict).expect("样例词库读不了"),
-        ))
+        ));
+        // 模拟自己画内联 preedit 的客户端（GTK）：辅助行带拼音。面板兜底的客户端见
+        // present::tests::panel_fallback_client_gets_no_duplicate_pinyin
+        host.client_caps = CAP_PREEDIT_TEXT;
+        host
     }
 
     /// 按下（非抬起）一枚键；键码缺省 0（数字行键码才参与分流）。

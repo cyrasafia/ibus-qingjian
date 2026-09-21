@@ -182,7 +182,7 @@ IMK 输入法，源码按 `app / host / imk / candidates / menubar / preferences
   成品 `target/pkg/qingjian-<版本>-macos-<arm64|x86_64>.pkg`）；`scripts/uninstall.sh` 卸载。
 - 日志在 `~/Library/Logs/Qingjian/`（按天分文件留 7 天，删了会重建），用户数据与配置在 `~/Library/Application Support/Qingjian/`。
 - 配置项：云联想 `[predict]`（偏好设置「云服务」页有「测试连接」按钮：`qingjian_predict::ConnectionTest` 起线程发一条最小请求，`Host` 用独立定时器 `CloudTestMonitor` 轮询结果显示到窗口底部；
-  `reasoning_effort` 缺省 `none`，DeepSeek V4 默认思考，不关正文为空）；模糊音 `[fuzzy]` 默认都关；`[general]` 学习语言（`off` 不显示译文）/ 每页候选数 / 翻页键 / 外观 / 竖排横排 / 拼音显示位置 /
+  `reasoning_effort` 缺省 `none`，DeepSeek V4 默认思考，不关正文为空）；模糊音 `[fuzzy]` 默认都关；`[general]` 学习语言（`off` 不显示译文）/ 每页候选数 / 翻页键 / 外观 / 竖排横排 / 拼音显示位置 / 拼音行显示原始键 `raw_preedit`（双拼 `nihc` 显示 `nihc` 不解成 `ni'hao`，只影响显示；2026-09-21 起有配置，目前仅 Linux 壳消费）/
   英文模式候选开关 / 中文优先 `chinese_first` / 双拼方案 `shuangpin`（小鹤 / 自然码 / 微软 / 搜狗 / 智能ABC / 小浪 / 首道，空为全拼）/ 日志级别 `log_level`（缺省 info 不含敲的内容，debug 逐键记，热切换）/ 输入日志 `input_log`；
   `[shortcut]` 模式键 v / u、`question_mark`（缺省关，开了空缓冲区敲 `?` 进问字）、上屏第一 / 第二个译词的修饰键 `translation` / `translation_second`、删候选 `delete_candidate`（缺省 shift，用户词整删、词库词清学习）、翻译选中文字 `translate_selection`；
   `[apps] english_candidates_off` 按 bundle identifier 列出英文模式不给候选的应用（缺省终端 / 编辑器 / IDE，`*` 前缀匹配）；
@@ -266,7 +266,13 @@ ibus 引擎（本 fork 新增，GNOME+Wayland+ibus 的 MVP，设计见 `docs/des
   [dictionary-import.md](dictionary-import.md)。
 - 配置覆盖面：`traditional` / `english_candidates` / `log_level`（启动时读）与 `[dictionaries]`（附加词库 / 领域词库开关）都已接；
   共享模板里 `[general] input_log`（输入日志）仍**未接**——配置文件里写了不生效；
-  主题 / 外观 / preedit 模式各项对 ibus 原生候选窗无意义（观感随系统）。
+  主题 / 外观各项对 ibus 原生候选窗无意义（观感随系统）；`[general] preedit` 模式
+  （both / inline / window）在 Linux 壳也仍未接——配置里写了不生效，内联 preedit 与辅助行
+  目前总是同发（gnome-shell 面板与终端 / XIM 各取所需）。
+- `[general] raw_preedit`（2026-09-21，拼音行显示原始键）：开了显示敲的键（`composition().typed_text()` + 字节光标，
+  双拼 `nihc` 不再解成 `ni'hao`，中文模式下 Shift 敲的大写还原）——`present::preedit_of` 一处分流，
+  内联 preedit 与辅助行同变；只影响显示，查询、学习、上屏消耗换算（`Decoded::keys_for`）都按解出的全拼走。
+  目前只有 Linux 壳消费，mac / Windows 壳还没接。
 
 ## apps/windows
 

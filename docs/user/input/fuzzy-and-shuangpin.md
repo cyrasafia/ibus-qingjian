@@ -30,6 +30,7 @@ description: 九条模糊音的开启方式与排序规则；全拼、七套双�
 七套方案：小鹤、自然码、微软、搜狗、智能ABC、小浪、首道。
 
 - 拼音行显示解出的全拼（`nihc` → `ni'hao`，小浪 `nihs` → `ni'hao`），学习按全拼记录，切回全拼后同样受益。
+  若想在拼音行看到敲的键（`nihc` 原样显示），在配置文件 `[general]` 里把 `raw_preedit` 设为 `true`；只影响显示，候选、学习与上屏不变。目前 Linux 版支持此项，macOS 与 Windows 版暂不支持。
 - 零声母：小鹤 / 自然码写 `aa` `ai` `ah`（a、ai、ang）一族；微软 / 搜狗写 `o` + 韵母键（`oa` `ol` `oh`）；智能ABC 也写 `o` + 韵母键，但韵母键按它自己的表（ei 是 `oq` 不是 `oz`），且不认双写元音（`aa` 是 zha、`ee` 是 che）；小浪写 `aa` `ai` `ah` `ao`、`uu`（e）、`ui`（ei）、`un`（en/eng）、`ur`（er）、`oo`（o）、`ou`（ou）。
 - 微软 / 搜狗的 `;` 为 ing：输入拼音时末尾有落单的声母，`;` 作为拼音（`x;` → xing）；其他情况下仍为标点。
 - 智能ABC 翘舌声母以 `a` 为 zh、`e` 为 ch、`v` 为 sh（`ai` → zhi、`ei` → chi、`vi` → shi）。

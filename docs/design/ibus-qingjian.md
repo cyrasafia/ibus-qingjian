@@ -99,7 +99,7 @@ zbus 直连再分两步走：
 
 壳只做架构约束允许的两件事：
 
-- **按键**：keysym + state → Core 的按键输入；Core 的帧 → `UpdatePreeditText` + `UpdateAuxiliaryText` + `UpdateLookupTable`；上屏 → `CommitText`。观感落点（真机验证过，2026-09-19）：内联 preedit 显示拼音 marked text（带 `'` 分隔与字符光标，同 mac 壳、光标编辑直接可见），**辅助行同帧再发一遍拼音**——主流 ibus 引擎（libpinyin 等）都发辅助行，不支持内联 preedit 的客户端（XIM、未声明能力的 text-input 路径）只有这条路能看到拼音；代价是内联可见的客户端会看到应用内与候选窗各一份拼音，观感能否接受真机继续用下来再定。候选表只放候选文本，排布方向按 `[general] layout` 显式下发（gnome-shell 把 `System` 当竖排处理、不回退系统设置，缺省发 `System` 等于横排永不生效）。
+- **按键**：keysym + state → Core 的按键输入；Core 的帧 → `UpdatePreeditText` + `UpdateAuxiliaryText` + `UpdateLookupTable`；上屏 → `CommitText`。观感落点（真机验证过，2026-09-19）：内联 preedit 显示拼音 marked text（带 `'` 分隔与字符光标，同 mac 壳、光标编辑直接可见），**辅助行同帧再发一遍拼音**——主流 ibus 引擎（libpinyin 等）都发辅助行，不支持内联 preedit 的客户端（XIM、未声明能力的 text-input 路径）只有这条路能看到拼音；代价是内联可见的客户端会看到应用内与候选窗各一份拼音，观感能否接受真机继续用下来再定。候选表只放候选文本，排布方向按 `[general] layout` 显式下发（gnome-shell 把 `System` 当竖排处理、不回退系统设置，缺省发 `System` 等于横排永不生效）。`[general] raw_preedit`（2026-09-21）开着时 preedit 与辅助行改为显示敲的原始键（`nihc` 而非 `ni'hao`，Shift 大写还原），分流在 `present::preedit_of`；只影响显示，查询与学习仍按全拼。
 - **进程模型**：ibus 会为每个 input context 各调一次 `CreateEngine`，多个 engine 对象全部转发到**进程级单例 Core `Engine`**（同 mac 壳 `host.rs` 的模式），`focus_in` 只切活跃对象。
 - 双拼小鹤：`[general] shuangpin = "flypy"`，Core 已有，无壳侧逻辑。
 - 依赖树只带 core / dictionary / lm / learning / format / platform；**translate / predict / neural / render 全部不进**——Core 的 `Translator` / `Predictor` trait 留空实现，候选照常出（mac/win 壳做不到这么干净，Linux 壳反而最贴「平台只是壳」）。

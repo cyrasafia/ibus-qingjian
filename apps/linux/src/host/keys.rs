@@ -473,8 +473,8 @@ mod tests {
                 // 对齐 present::frame_after_change：一次查询同时拿 preedit 与候选
                 match self.host.engine.query() {
                     Ok(query) => {
-                        let preedit = query.marked_text();
-                        let cursor = query.marked_cursor();
+                        let (preedit, cursor) =
+                            crate::ibus::present::preedit_of(&self.host, &query);
                         self.host
                             .session
                             .reset(preedit, cursor, query.candidates.items);

@@ -49,6 +49,10 @@ pub struct GeneralConfig {
     /// 组句中的拼音显示在行内、候选窗口还是两处都显示。
     pub preedit: PreeditMode,
 
+    /// 拼音行显示敲的原始键而不是解出的全拼（双拼 `nihc` 显示 `nihc` 而不是 `ni'hao`）。
+    /// 只影响显示；查询、学习、上屏消耗的换算都按解出的全拼走，不受影响。
+    pub raw_preedit: bool,
+
     /// 英文模式（Caps Lock 亮着）是否给英文候选（补全与拼错纠正）。关掉就是纯直通。
     pub english_candidates: bool,
 
@@ -124,6 +128,7 @@ impl Default for GeneralConfig {
             renderer: CandidateRenderer::default(),
             font: String::new(),
             preedit: PreeditMode::default(),
+            raw_preedit: false,
             english_candidates: true,
             traditional: false,
             chinese_first: false,

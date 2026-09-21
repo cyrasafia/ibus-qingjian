@@ -35,6 +35,22 @@ pub struct Frame {
     pub table_visible: bool,
 }
 
+/// 查询成功后构 preedit 的显示文本与字符光标。
+///
+/// 缺省显示解出的全拼（`Query::marked_text`，双拼 `nihc` → `ni'hao`）；
+/// `[general] raw_preedit` 开着时显示敲的原始键（`nihc`）——`typed_text` 把中文模式下
+/// Shift 敲的大写还原，缓冲全 ASCII、字节位即字符位（组句中的 `'` 也原样保留）。
+/// 两条路都不掺删候选提示（内联 preedit 是应用里的 marked text，混进去光标换算全乱）。
+pub fn preedit_of(host: &Host, query: &qingjian_core::Query) -> (String, usize) {
+    if host.raw_preedit {
+        let text = host.engine.composition().typed_text();
+        let cursor = host.engine.composition().cursor();
+        (text, cursor)
+    } else {
+        (query.marked_text(), query.marked_cursor())
+    }
+}
+
 /// 重查候选后构帧（按键改了缓冲区之后用这个）。
 ///
 /// 一次查询同时拿候选与 preedit（查询是这里最贵的活，不能每键跑两遍，对齐 mac 壳 refresh 的做法）；
@@ -42,13 +58,14 @@ pub struct Frame {
 pub fn frame_after_change(host: &mut Host) -> Frame {
     match host.engine.query() {
         Ok(query) => {
-            let preedit = query.marked_text();
-            let cursor = query.marked_cursor();
+            let (preedit, cursor) = preedit_of(host, &query);
             let candidates = query.candidates.items;
             host.session.reset(preedit, cursor, candidates);
         }
         Err(_) => {
-            let text = host.engine.composition().text().to_owned();
+            // 查询失败（整段切不动）：回退显示敲的原始键——没有解出的全拼可显示，
+            // 大写还原（typed_text）与原样上屏（take_raw）走同一个口径
+            let text = host.engine.composition().typed_text();
             let cursor = host.engine.composition().cursor();
             host.session.reset(text, cursor, Vec::new());
         }
@@ -220,6 +237,56 @@ mod tests {
         assert_eq!(frame.aux, "ni", "没提示时辅助行就是拼音");
         assert_eq!(frame.table.candidates().len(), 3);
         assert!(frame.table_visible);
+    }
+
+    #[test]
+    fn raw_preedit_shows_typed_keys_under_shuangpin() {
+        // 双拼开着时缺省显示解出的全拼（nihc → ni'hao）；raw_preedit 开着则显示敲的键。
+        // 两条路都要发一帧（候选照常、辅助行同内容）。
+        let dict = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/sample/dict.tsv");
+        let mut host = Host::with_engine_and_config(
+            qingjian_core::Engine::new(
+                qingjian_dictionary::Dictionary::from_path(dict).expect("样例词库读不了"),
+            ),
+            Config::default(),
+        );
+        host.engine
+            .set_shuangpin(Some(qingjian_core::ShuangpinScheme::Xiaohe));
+        for c in "nihc".chars() {
+            host.engine.push(c);
+        }
+        let frame = frame_after_change(&mut host);
+        assert_eq!(frame.preedit, "ni'hao", "缺省显示解出的全拼");
+        assert!(frame.table_visible, "候选照常");
+        assert_eq!(frame.aux, "ni'hao");
+
+        host.raw_preedit = true;
+        let frame = frame_after_change(&mut host);
+        assert_eq!(frame.preedit, "nihc", "raw_preedit 显示敲的原始键");
+        assert_eq!(frame.aux, "nihc", "辅助行跟着显示原始键");
+        assert!(frame.table_visible, "候选不受显示模式影响");
+        assert_eq!(frame.cursor, 4);
+    }
+
+    #[test]
+    fn query_failure_fallback_shows_typed_keys() {
+        // 整段切不动（`Ii` 的头一个 I 是大写直进，i 起不了音节）：回退显示敲的原始键，
+        // Shift 大写还原与原样上屏（take_raw）同一个口径——不能显示成小写
+        let dict = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/sample/dict.tsv");
+        let mut host = Host::with_engine_and_config(
+            qingjian_core::Engine::new(
+                qingjian_dictionary::Dictionary::from_path(dict).expect("样例词库读不了"),
+            ),
+            Config::default(),
+        );
+        host.engine.set_shift_letter_compose(true);
+        for c in "Ii".chars() {
+            host.engine.push(c);
+        }
+        let frame = frame_after_change(&mut host);
+        assert!(!frame.table_visible, "切不动不出候选");
+        assert_eq!(frame.preedit, "Ii", "回退显示敲的键（大写还原）");
+        assert_eq!(frame.aux, "Ii");
     }
 
     #[test]

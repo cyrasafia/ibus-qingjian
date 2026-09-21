@@ -49,6 +49,10 @@ pub struct Host {
     /// 候选窗排布（配置 `[general] layout`）：竖排 / 横排，随 LookupTable 下发给面板。
     pub layout: LayoutMode,
 
+    /// 拼音行显示原始键（配置 `[general] raw_preedit`）：开着时 preedit 与辅助行显示敲的键
+    /// 而不是解出的全拼；只影响显示，查询与学习不变。
+    pub raw_preedit: bool,
+
     /// 翻页键对（配置 `[general] page_keys`）。
     pub page_keys: (char, char),
 
@@ -101,6 +105,7 @@ impl Host {
             session: Session::default(),
             page_size: 9,
             layout: LayoutMode::default(),
+            raw_preedit: false,
             page_keys: DEFAULT_PAGE_KEYS,
             switch_key: SwitchKey::default(),
             english_mode_enabled: true,
@@ -150,6 +155,7 @@ impl Host {
         self.apply_scheme(config.general.scheme());
         self.page_size = config.general.page_size();
         self.layout = config.general.layout;
+        self.raw_preedit = config.general.raw_preedit;
         self.page_keys = config.general.page_keys();
         self.english_mode_enabled = config.general.english_mode;
         self.english_candidates = config.general.english_candidates;
